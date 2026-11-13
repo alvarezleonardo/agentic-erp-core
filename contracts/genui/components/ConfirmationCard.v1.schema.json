@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agentic-erp.dev/genui/components/ConfirmationCard.v1.schema.json",
+  "title": "ConfirmationCard v1",
+  "description": "Tarjeta de confirmación de una escritura. Se hidrata SOLO desde un preparar_*: el modelo no escribe ni un campo de la propuesta. El token viaja a la superficie (x-hidden) y vuelve en ui.action.",
+  "type": "object",
+  "required": ["proposal_id", "titulo", "expira_en", "confirmation_token"],
+  "additionalProperties": false,
+  "properties": {
+    "proposal_id": { "type": "string", "x-source": "proposal" },
+    "titulo": { "type": "string", "x-source": "proposal" },
+    "resumen": {
+      "type": "array",
+      "x-source": "proposal",
+      "items": { "type": "object", "required": ["etiqueta", "valor"], "additionalProperties": false, "properties": { "etiqueta": { "type": "string" }, "valor": { "type": "string" } } }
+    },
+    "lineas": {
+      "type": "array",
+      "maxItems": 100,
+      "x-source": "proposal",
+      "items": {
+        "type": "object",
+        "required": ["descripcion"],
+        "additionalProperties": false,
+        "properties": {
+          "descripcion": { "type": "string" },
+          "cantidad": { "type": "string" },
+          "precio_unitario": { "$ref": "../envelope.schema.json#/$defs/money" },
+          "importe": { "$ref": "../envelope.schema.json#/$defs/money" }
+        }
+      }
+    },
+    "total": { "$ref": "../envelope.schema.json#/$defs/money", "x-source": "proposal" },
+    "advertencias": { "type": "array", "x-source": "proposal", "items": { "type": "string", "maxLength": 200 } },
+    "requiere_step_up": { "type": "boolean", "x-source": "proposal" },
+    "step_up": { "enum": ["motivo", "supervisor", "supervisor_y_motivo"], "x-source": "proposal", "description": "Qué pide la tarjeta al confirmar: un motivo escrito, usuario y PIN de un supervisor, o ambos. Ausente = alcanza con confirmar. El PIN y el motivo viajan en ui.action (confirmation.step_up), nunca por el modelo." },
+    "expira_en": { "type": "string", "format": "date-time", "x-source": "proposal" },
+    "confirmation_token": { "type": "string", "x-source": "proposal", "x-hidden": true }
+  }
+}

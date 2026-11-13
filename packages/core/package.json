@@ -1,0 +1,44 @@
+{
+  "name": "@agentic-erp/core",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Núcleo: router híbrido, AgentRunner, ProposalStore, Compositor, ContractValidator, memoria, permisos y trazas.",
+  "license": "MIT",
+  "author": {
+    "name": "Leonardo Alvarez",
+    "url": "https://github.com/alvarezleonardo"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/alvarezleonardo/agentic-erp-core.git",
+    "directory": "packages/core"
+  },
+  "homepage": "https://github.com/alvarezleonardo/agentic-erp-core/tree/main/packages/core#readme",
+  "bugs": {
+    "url": "https://github.com/alvarezleonardo/agentic-erp-core/issues"
+  },
+  "keywords": [
+    "agents",
+    "mcp",
+    "erp",
+    "typescript",
+    "llm",
+    "human-in-the-loop",
+    "orchestrator",
+    "router",
+    "proposal-store",
+    "confirmation"
+  ],
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    }
+  },
+  "dependencies": {
+    "@agentic-erp/llm": "0.1.0",
+    "@agentic-erp/mcp-contract": "0.1.0",
+    "ajv": "8.20.0",
+    "ajv-formats": "3.0.1"
+  }
+}

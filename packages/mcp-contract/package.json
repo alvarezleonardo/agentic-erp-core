@@ -1,0 +1,43 @@
+{
+  "name": "@agentic-erp/mcp-contract",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "El contrato que un ERP expone por MCP: lecturas, preparar/confirmar con idempotencia, eventos con cursor y métricas semánticas.",
+  "license": "MIT",
+  "author": {
+    "name": "Leonardo Alvarez",
+    "url": "https://github.com/alvarezleonardo"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/alvarezleonardo/agentic-erp-core.git",
+    "directory": "packages/mcp-contract"
+  },
+  "homepage": "https://github.com/alvarezleonardo/agentic-erp-core/tree/main/packages/mcp-contract#readme",
+  "bugs": {
+    "url": "https://github.com/alvarezleonardo/agentic-erp-core/issues"
+  },
+  "keywords": [
+    "agents",
+    "mcp",
+    "erp",
+    "typescript",
+    "llm",
+    "human-in-the-loop",
+    "mcp-contract",
+    "json-schema",
+    "idempotency",
+    "conformance"
+  ],
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    },
+    "./schema": "./schema/contract.schema.json"
+  },
+  "dependencies": {
+    "ajv": "8.20.0",
+    "ajv-formats": "3.0.1"
+  }
+}

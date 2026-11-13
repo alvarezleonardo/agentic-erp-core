@@ -1,0 +1,52 @@
+name: Reporte de error
+description: Algo no funciona como debería
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Si es una vulnerabilidad de seguridad, no uses este formulario: seguí [SECURITY.md](https://github.com/alvarezleonardo/agentic-erp-core/blob/main/.github/SECURITY.md).
+  - type: dropdown
+    id: paquete
+    attributes:
+      label: Paquete afectado
+      options:
+        - "@agentic-erp/core"
+        - "@agentic-erp/llm"
+        - "@agentic-erp/mcp-client"
+        - "@agentic-erp/mcp-contract"
+        - examples/erp-sintetico
+        - contracts/genui
+        - No sé
+    validations:
+      required: true
+  - type: textarea
+    id: que-paso
+    attributes:
+      label: Qué pasó
+      description: Describí el comportamiento observado y el esperado.
+    validations:
+      required: true
+  - type: textarea
+    id: reproducir
+    attributes:
+      label: Cómo reproducirlo
+      description: Pasos o un fragmento de código mínimo. No incluyas claves, tokens ni PIN.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Versión o commit
+      placeholder: "0.1.0"
+  - type: input
+    id: node
+    attributes:
+      label: Versión de Node
+      placeholder: "22.x"
+  - type: textarea
+    id: logs
+    attributes:
+      label: Salida o trazas relevantes
+      description: Sin datos sensibles.
+      render: shell

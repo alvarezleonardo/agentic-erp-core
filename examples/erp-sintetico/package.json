@@ -1,0 +1,43 @@
+{
+  "name": "@agentic-erp/example-erp-sintetico",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Servidor MCP de ejemplo con datos sintéticos deterministas de un ERP genérico (ventas, stock, compras, caja) y sus agentes.",
+  "license": "MIT",
+  "author": {
+    "name": "Leonardo Alvarez",
+    "url": "https://github.com/alvarezleonardo"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/alvarezleonardo/agentic-erp-core.git",
+    "directory": "examples/erp-sintetico"
+  },
+  "homepage": "https://github.com/alvarezleonardo/agentic-erp-core/tree/main/examples/erp-sintetico#readme",
+  "bugs": {
+    "url": "https://github.com/alvarezleonardo/agentic-erp-core/issues"
+  },
+  "keywords": [
+    "agents",
+    "mcp",
+    "erp",
+    "typescript",
+    "llm",
+    "human-in-the-loop",
+    "example",
+    "synthetic-data",
+    "mcp-server"
+  ],
+  "scripts": {
+    "demo": "tsx src/demo.ts"
+  },
+  "dependencies": {
+    "@agentic-erp/core": "0.1.0",
+    "@agentic-erp/llm": "0.1.0",
+    "@agentic-erp/mcp-client": "0.1.0",
+    "@agentic-erp/mcp-contract": "0.1.0",
+    "@modelcontextprotocol/sdk": "1.32.2",
+    "ajv": "8.20.0"
+  }
+}

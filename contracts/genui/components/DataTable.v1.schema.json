@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agentic-erp.dev/genui/components/DataTable.v1.schema.json",
+  "title": "DataTable v1",
+  "description": "Tabla de solo lectura hidratada desde una lectura tabular (SalidaTabla del contrato). Las celdas de dinero son objetos {monto, moneda} del servidor.",
+  "type": "object",
+  "required": ["columnas", "filas"],
+  "additionalProperties": false,
+  "properties": {
+    "titulo": { "type": "string", "maxLength": 120 },
+    "columnas": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 20,
+      "x-source": "query",
+      "items": {
+        "type": "object",
+        "required": ["id", "etiqueta"],
+        "additionalProperties": false,
+        "properties": {
+          "id": { "type": "string" },
+          "etiqueta": { "type": "string" },
+          "tipo": { "enum": ["texto", "numero", "dinero", "fecha", "porcentaje", "estado"] }
+        }
+      }
+    },
+    "filas": { "type": "array", "maxItems": 200, "x-source": "query", "items": { "type": "object" } },
+    "total_filas": { "type": "integer", "minimum": 0, "x-source": "query" },
+    "truncada": { "type": "boolean", "x-source": "query" }
+  }
+}

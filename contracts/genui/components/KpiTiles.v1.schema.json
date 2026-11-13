@@ -1,0 +1,66 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agentic-erp.dev/genui/components/KpiTiles.v1.schema.json",
+  "title": "KpiTiles v1",
+  "description": "Indicadores con comparación y tendencia. Valores y variaciones los calcula el servidor (capa semántica de métricas); la superficie solo los formatea.",
+  "type": "object",
+  "required": ["kpis"],
+  "additionalProperties": false,
+  "properties": {
+    "titulo": { "type": "string", "maxLength": 80 },
+    "periodo": {
+      "type": "object",
+      "x-source": "query",
+      "additionalProperties": false,
+      "required": ["desde", "hasta"],
+      "properties": { "desde": { "type": "string" }, "hasta": { "type": "string" }, "etiqueta": { "type": "string" } }
+    },
+    "fuente": {
+      "type": "object",
+      "x-source": "query",
+      "additionalProperties": false,
+      "required": ["origen"],
+      "properties": { "origen": { "type": "string", "maxLength": 120 }, "actualizado_en": { "type": "string", "format": "date-time" } }
+    },
+    "kpis": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 12,
+      "x-source": "query",
+      "items": {
+        "type": "object",
+        "required": ["id", "etiqueta", "valor"],
+        "additionalProperties": false,
+        "properties": {
+          "id": { "type": "string", "maxLength": 60 },
+          "etiqueta": { "type": "string", "maxLength": 60 },
+          "valor": { "$ref": "#/$defs/valor" },
+          "comparacion": {
+            "type": "object",
+            "required": ["variacion_pct"],
+            "additionalProperties": false,
+            "properties": {
+              "variacion_pct": { "type": "string", "pattern": "^-?[0-9]+(\\.[0-9]+)?$" },
+              "periodo_anterior": { "type": "string" },
+              "valor_anterior": { "$ref": "#/$defs/valor" }
+            }
+          },
+          "tendencia": { "enum": ["sube", "baja", "estable"] },
+          "sentido_favorable": { "enum": ["mayor_es_mejor", "menor_es_mejor"] }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "valor": {
+      "type": "object",
+      "required": ["tipo", "valor"],
+      "additionalProperties": false,
+      "properties": {
+        "tipo": { "enum": ["moneda", "cantidad", "porcentaje", "minutos"] },
+        "valor": { "type": "string", "pattern": "^-?[0-9]+(\\.[0-9]+)?$" },
+        "moneda": { "type": "string", "pattern": "^[A-Z]{3}$" }
+      }
+    }
+  }
+}

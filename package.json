@@ -1,0 +1,51 @@
+{
+  "name": "agentic-erp-core",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Framework para agregar una capa agéntica a un ERP: el agente propone y la persona decide.",
+  "license": "MIT",
+  "author": {
+    "name": "Leonardo Alvarez",
+    "url": "https://github.com/alvarezleonardo"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/alvarezleonardo/agentic-erp-core.git"
+  },
+  "homepage": "https://github.com/alvarezleonardo/agentic-erp-core#readme",
+  "bugs": {
+    "url": "https://github.com/alvarezleonardo/agentic-erp-core/issues"
+  },
+  "keywords": [
+    "agents",
+    "mcp",
+    "erp",
+    "typescript",
+    "llm",
+    "human-in-the-loop",
+    "agentic",
+    "orchestrator"
+  ],
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "workspaces": [
+    "packages/*",
+    "examples/*"
+  ],
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "eval": "tsx evals/runner.ts",
+    "demo": "tsx examples/erp-sintetico/src/demo.ts",
+    "ejemplo:servidor": "tsx examples/erp-sintetico/src/main.ts",
+    "check": "npm run typecheck && npm test && npm run eval"
+  },
+  "devDependencies": {
+    "@types/node": "22.19.1",
+    "tsx": "4.23.15",
+    "typescript": "7.0.2",
+    "vitest": "5.0.5"
+  }
+}

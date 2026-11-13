@@ -1,0 +1,37 @@
+{
+  "name": "@agentic-erp/llm",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Interfaz LlmProvider, ScriptedProvider para pruebas, presupuesto de gasto y un adaptador de ejemplo.",
+  "license": "MIT",
+  "author": {
+    "name": "Leonardo Alvarez",
+    "url": "https://github.com/alvarezleonardo"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/alvarezleonardo/agentic-erp-core.git",
+    "directory": "packages/llm"
+  },
+  "homepage": "https://github.com/alvarezleonardo/agentic-erp-core/tree/main/packages/llm#readme",
+  "bugs": {
+    "url": "https://github.com/alvarezleonardo/agentic-erp-core/issues"
+  },
+  "keywords": [
+    "agents",
+    "mcp",
+    "erp",
+    "typescript",
+    "llm",
+    "human-in-the-loop",
+    "llm-provider",
+    "budget",
+    "openai-compatible"
+  ],
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    }
+  }
+}

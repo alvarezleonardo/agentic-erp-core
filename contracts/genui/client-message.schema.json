@@ -1,0 +1,91 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agentic-erp.dev/genui/client-message.schema.json",
+  "title": "Mensajes de la superficie al orquestador",
+  "description": "Versión 1.1: user.input puede traer `comando` (modo directo) en vez de texto y step_up suma `motivo`. Un orquestador 1.0 sigue entendiendo todo lo de 1.0.",
+  "oneOf": [
+    {
+      "type": "object",
+      "required": ["v", "type", "message_id"],
+      "additionalProperties": false,
+      "anyOf": [{ "required": ["text"] }, { "required": ["comando"] }],
+      "if": { "required": ["comando"] },
+      "then": { "properties": { "v": { "const": "1.1" } } },
+      "properties": {
+        "v": { "enum": ["1.0", "1.1"] },
+        "type": { "const": "user.input" },
+        "message_id": { "type": "string" },
+        "text": { "type": "string", "minLength": 1, "maxLength": 2000, "description": "Lo que dijo la persona. Con `comando` es opcional: la descripción legible que queda en la auditoría." },
+        "context": { "type": "object" },
+        "comando": {
+          "type": "object",
+          "required": ["tool"],
+          "additionalProperties": false,
+          "description": "Modo directo (1.1): el orquestador ejecuta esta tool sin pasar por el modelo, con los permisos y el contexto de la sesión. Nunca confirmar_*: confirmar es siempre un ui.action de la persona.",
+          "properties": {
+            "tool": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$", "maxLength": 64 },
+            "args": { "type": "object", "description": "Argumentos de la tool, sin contexto ni claves de idempotencia: los pone el orquestador." }
+          }
+        }
+      }
+    },
+    {
+      "type": "object",
+      "required": ["v", "type", "message_id", "intent_id", "action_id"],
+      "additionalProperties": false,
+      "properties": {
+        "v": { "enum": ["1.0", "1.1"] },
+        "type": { "const": "ui.action" },
+        "message_id": { "type": "string" },
+        "intent_id": { "type": "string" },
+        "proposal_id": { "type": "string" },
+        "action_id": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+        "option_id": { "type": "string", "description": "Para Clarification: la opción elegida." },
+        "confirmation": {
+          "type": "object",
+          "required": ["confirmation_token"],
+          "additionalProperties": false,
+          "properties": {
+            "confirmation_token": { "type": "string" },
+            "idempotency_key": { "type": "string", "minLength": 8, "maxLength": 128 },
+            "step_up": {
+              "type": "object",
+              "minProperties": 1,
+              "additionalProperties": false,
+              "description": "Lo que pidió el step-up de la tarjeta: usuario y pin (supervisor), motivo, o ambos. Viaja al servidor; nunca al modelo.",
+              "properties": {
+                "usuario": { "type": "string" },
+                "pin": { "type": "string" },
+                "motivo": { "type": "string", "minLength": 1, "maxLength": 200 }
+              },
+              "dependentRequired": { "usuario": ["pin"], "pin": ["usuario"] }
+            }
+          }
+        }
+      }
+    },
+    {
+      "type": "object",
+      "required": ["v", "type", "message_id", "intent_id"],
+      "additionalProperties": false,
+      "properties": {
+        "v": { "enum": ["1.0", "1.1"] },
+        "type": { "const": "ui.dismissed" },
+        "message_id": { "type": "string" },
+        "intent_id": { "type": "string" },
+        "reason": { "enum": ["user", "timeout", "superseded"] }
+      }
+    },
+    {
+      "type": "object",
+      "required": ["v", "type", "message_id"],
+      "additionalProperties": false,
+      "properties": {
+        "v": { "enum": ["1.0", "1.1"] },
+        "type": { "const": "client.hello" },
+        "message_id": { "type": "string" },
+        "supported_components": { "type": "object", "additionalProperties": { "type": "array", "items": { "type": "integer" } } }
+      }
+    }
+  ]
+}

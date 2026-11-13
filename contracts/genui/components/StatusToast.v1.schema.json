@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agentic-erp.dev/genui/components/StatusToast.v1.schema.json",
+  "title": "StatusToast v1",
+  "description": "Aviso breve. Si lleva un importe, sale del servidor.",
+  "type": "object",
+  "required": ["nivel", "mensaje"],
+  "additionalProperties": false,
+  "properties": {
+    "nivel": { "enum": ["info", "exito", "aviso", "error"] },
+    "titulo": { "type": "string", "maxLength": 60 },
+    "mensaje": { "type": "string", "minLength": 1, "maxLength": 140 },
+    "monto": { "$ref": "../envelope.schema.json#/$defs/money", "x-source": "proposal" }
+  }
+}

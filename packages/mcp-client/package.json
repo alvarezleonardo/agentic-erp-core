@@ -1,0 +1,40 @@
+{
+  "name": "@agentic-erp/mcp-client",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Cliente MCP compuesto: une varios servidores MCP detrás de un solo puerto ToolClient.",
+  "license": "MIT",
+  "author": {
+    "name": "Leonardo Alvarez",
+    "url": "https://github.com/alvarezleonardo"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/alvarezleonardo/agentic-erp-core.git",
+    "directory": "packages/mcp-client"
+  },
+  "homepage": "https://github.com/alvarezleonardo/agentic-erp-core/tree/main/packages/mcp-client#readme",
+  "bugs": {
+    "url": "https://github.com/alvarezleonardo/agentic-erp-core/issues"
+  },
+  "keywords": [
+    "agents",
+    "mcp",
+    "erp",
+    "typescript",
+    "llm",
+    "human-in-the-loop",
+    "mcp-client",
+    "model-context-protocol"
+  ],
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    }
+  },
+  "dependencies": {
+    "@agentic-erp/mcp-contract": "0.1.0",
+    "@modelcontextprotocol/sdk": "1.32.2"
+  }
+}

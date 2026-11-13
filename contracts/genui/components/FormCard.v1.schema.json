@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agentic-erp.dev/genui/components/FormCard.v1.schema.json",
+  "title": "FormCard v1",
+  "description": "Formulario para completar datos que faltan. El modelo define los campos; no lleva montos ni confirma nada: al enviar, el orquestador vuelve a preparar y la persona confirma en una ConfirmationCard.",
+  "type": "object",
+  "required": ["titulo", "campos"],
+  "additionalProperties": false,
+  "properties": {
+    "titulo": { "type": "string", "maxLength": 120 },
+    "descripcion": { "type": "string", "maxLength": 240 },
+    "campos": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 12,
+      "items": {
+        "type": "object",
+        "required": ["id", "etiqueta", "tipo"],
+        "additionalProperties": false,
+        "properties": {
+          "id": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+          "etiqueta": { "type": "string", "maxLength": 60 },
+          "tipo": { "enum": ["texto", "numero", "fecha", "seleccion", "si_no"] },
+          "requerido": { "type": "boolean" },
+          "valor": { "type": ["string", "number", "boolean", "null"] },
+          "opciones": {
+            "type": "array",
+            "maxItems": 30,
+            "items": { "type": "object", "required": ["id", "etiqueta"], "additionalProperties": false, "properties": { "id": { "type": "string" }, "etiqueta": { "type": "string" } } }
+          }
+        }
+      }
+    }
+  }
+}

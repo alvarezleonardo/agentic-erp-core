@@ -1,0 +1,307 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agentic-erp.dev/contract/v0/contract.schema.json",
+  "title": "Contrato MCP de agentic-erp v0",
+  "description": "Formas de entrada y salida que un ERP debe respetar al exponerse por MCP. Cada definición se valida con validarContrato(nombre, valor).",
+  "$defs": {
+    "Dinero": {
+      "type": "object",
+      "required": ["monto", "moneda"],
+      "additionalProperties": false,
+      "properties": {
+        "monto": { "type": "string", "pattern": "^-?[0-9]+\\.[0-9]{2}$" },
+        "moneda": { "type": "string", "pattern": "^[A-Z]{3}$" }
+      }
+    },
+    "Contexto": {
+      "type": "object",
+      "required": ["tenant", "usuario", "rol"],
+      "additionalProperties": false,
+      "properties": {
+        "tenant": { "type": "string", "minLength": 1 },
+        "usuario": { "type": "string", "minLength": 1 },
+        "rol": { "type": "string", "minLength": 1 },
+        "sucursal": { "type": "string" },
+        "origen": { "enum": ["humano", "agente"] }
+      }
+    },
+    "ErrorTool": {
+      "type": "object",
+      "required": ["codigo", "mensaje"],
+      "additionalProperties": false,
+      "properties": {
+        "codigo": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]{2,48}$" },
+        "mensaje": { "type": "string", "minLength": 1 },
+        "accion_sugerida": { "type": "string" }
+      }
+    },
+    "Propuesta": {
+      "type": "object",
+      "required": ["proposal_id", "confirmation_token", "expira_en", "titulo"],
+      "additionalProperties": true,
+      "properties": {
+        "proposal_id": { "type": "string", "minLength": 1 },
+        "confirmation_token": { "type": "string", "minLength": 16 },
+        "expira_en": { "type": "string", "format": "date-time" },
+        "titulo": { "type": "string", "minLength": 1 },
+        "resumen": {
+          "type": "array",
+          "items": { "type": "object", "required": ["etiqueta", "valor"], "additionalProperties": false, "properties": { "etiqueta": { "type": "string" }, "valor": { "type": "string" } } }
+        },
+        "lineas": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["descripcion"],
+            "additionalProperties": false,
+            "properties": {
+              "descripcion": { "type": "string" },
+              "cantidad": { "type": "string", "pattern": "^[0-9]+(\\.[0-9]{1,3})?$" },
+              "precio_unitario": { "$ref": "#/$defs/Dinero" },
+              "importe": { "$ref": "#/$defs/Dinero" }
+            }
+          }
+        },
+        "total": { "$ref": "#/$defs/Dinero" },
+        "advertencias": { "type": "array", "items": { "type": "string" } },
+        "step_up": { "enum": ["none", "motivo", "supervisor", "supervisor_y_motivo"], "description": "Qué pide la confirmación además del token. Sin este campo vale requiere_step_up (true = supervisor)." },
+        "requiere_step_up": { "type": "boolean", "description": "Compatibilidad: true equivale a step_up supervisor." }
+      }
+    },
+    "ConfirmarEntrada": {
+      "type": "object",
+      "required": ["contexto", "proposal_id", "confirmation_token", "idempotency_key"],
+      "additionalProperties": false,
+      "properties": {
+        "contexto": { "$ref": "#/$defs/Contexto" },
+        "proposal_id": { "type": "string", "minLength": 1 },
+        "confirmation_token": { "type": "string", "minLength": 16 },
+        "idempotency_key": { "type": "string", "minLength": 8, "maxLength": 128 },
+        "autorizacion": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Step-up. supervisor pide usuario y pin; motivo pide motivo; supervisor_y_motivo pide los tres. El servidor decide qué exige cada propuesta.",
+          "properties": {
+            "usuario": { "type": "string", "minLength": 1 },
+            "pin": { "type": "string", "minLength": 1 },
+            "motivo": { "type": "string", "minLength": 1, "maxLength": 200 }
+          }
+        }
+      }
+    },
+    "ConfirmarSalida": {
+      "type": "object",
+      "required": ["estado", "proposal_id", "idempotente", "resultado"],
+      "additionalProperties": true,
+      "properties": {
+        "estado": { "const": "confirmado" },
+        "proposal_id": { "type": "string" },
+        "idempotente": { "type": "boolean" },
+        "resultado": { "type": "object" },
+        "mensaje": { "type": "string" }
+      }
+    },
+    "Evento": {
+      "type": "object",
+      "required": ["secuencia", "tipo", "ocurrido_en", "payload"],
+      "additionalProperties": false,
+      "properties": {
+        "secuencia": { "type": "integer", "minimum": 1 },
+        "tipo": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+        "ocurrido_en": { "type": "string", "format": "date-time" },
+        "payload": { "type": "object" }
+      }
+    },
+    "ConsumirEventosEntrada": {
+      "type": "object",
+      "required": ["contexto"],
+      "additionalProperties": false,
+      "properties": {
+        "contexto": { "$ref": "#/$defs/Contexto" },
+        "desde_secuencia": { "type": "integer", "minimum": 0 },
+        "tipos": { "type": "array", "items": { "type": "string" } },
+        "limite": { "type": "integer", "minimum": 1, "maximum": 500 }
+      }
+    },
+    "ConsumirEventosSalida": {
+      "type": "object",
+      "required": ["eventos", "siguiente"],
+      "additionalProperties": false,
+      "properties": {
+        "eventos": { "type": "array", "items": { "$ref": "#/$defs/Evento" } },
+        "siguiente": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "DefMetrica": {
+      "type": "object",
+      "required": ["id", "etiqueta", "descripcion", "tipo", "dimensiones", "sentido_favorable"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+        "etiqueta": { "type": "string" },
+        "descripcion": { "type": "string" },
+        "tipo": { "enum": ["moneda", "cantidad", "porcentaje", "minutos"] },
+        "dimensiones": { "type": "array", "items": { "type": "string" } },
+        "sentido_favorable": { "enum": ["mayor_es_mejor", "menor_es_mejor"] }
+      }
+    },
+    "ListarMetricasSalida": {
+      "type": "object",
+      "required": ["metricas"],
+      "additionalProperties": false,
+      "properties": { "metricas": { "type": "array", "items": { "$ref": "#/$defs/DefMetrica" } } }
+    },
+    "ConsultarMetricaEntrada": {
+      "type": "object",
+      "required": ["contexto", "metricas", "desde", "hasta"],
+      "additionalProperties": false,
+      "properties": {
+        "contexto": { "$ref": "#/$defs/Contexto" },
+        "metricas": { "type": "array", "minItems": 1, "items": { "type": "string" } },
+        "desde": { "type": "string", "format": "date" },
+        "hasta": { "type": "string", "format": "date" },
+        "comparar_con_anterior": { "type": "boolean" }
+      }
+    },
+    "Valor": {
+      "type": "object",
+      "required": ["tipo", "valor"],
+      "additionalProperties": false,
+      "properties": {
+        "tipo": { "enum": ["moneda", "cantidad", "porcentaje", "minutos"] },
+        "valor": { "type": "string", "pattern": "^-?[0-9]+(\\.[0-9]+)?$" },
+        "moneda": { "type": "string", "pattern": "^[A-Z]{3}$" }
+      }
+    },
+    "SalidaMetricas": {
+      "type": "object",
+      "required": ["periodo", "kpis"],
+      "additionalProperties": false,
+      "properties": {
+        "periodo": {
+          "type": "object",
+          "required": ["desde", "hasta"],
+          "additionalProperties": false,
+          "properties": { "desde": { "type": "string" }, "hasta": { "type": "string" }, "etiqueta": { "type": "string" } }
+        },
+        "kpis": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": ["id", "etiqueta", "valor"],
+            "additionalProperties": false,
+            "properties": {
+              "id": { "type": "string" },
+              "etiqueta": { "type": "string" },
+              "valor": { "$ref": "#/$defs/Valor" },
+              "comparacion": {
+                "type": "object",
+                "required": ["variacion_pct"],
+                "additionalProperties": false,
+                "properties": {
+                  "variacion_pct": { "type": "string", "pattern": "^-?[0-9]+(\\.[0-9]+)?$" },
+                  "periodo_anterior": { "type": "string" },
+                  "valor_anterior": { "$ref": "#/$defs/Valor" }
+                }
+              },
+              "tendencia": { "enum": ["sube", "baja", "estable"] },
+              "sentido_favorable": { "enum": ["mayor_es_mejor", "menor_es_mejor"] }
+            }
+          }
+        },
+        "fuente": {
+          "type": "object",
+          "required": ["origen"],
+          "additionalProperties": false,
+          "properties": { "origen": { "type": "string" }, "actualizado_en": { "type": "string", "format": "date-time" } }
+        }
+      }
+    },
+    "SalidaTabla": {
+      "type": "object",
+      "required": ["columnas", "filas"],
+      "additionalProperties": true,
+      "properties": {
+        "titulo": { "type": "string" },
+        "columnas": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": ["id", "etiqueta"],
+            "additionalProperties": false,
+            "properties": {
+              "id": { "type": "string" },
+              "etiqueta": { "type": "string" },
+              "tipo": { "enum": ["texto", "numero", "dinero", "fecha", "porcentaje", "estado"] }
+            }
+          }
+        },
+        "filas": { "type": "array", "items": { "type": "object" } },
+        "total_filas": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "SalidaDetalle": {
+      "type": "object",
+      "required": ["titulo", "campos"],
+      "additionalProperties": true,
+      "properties": {
+        "titulo": { "type": "string" },
+        "campos": {
+          "type": "array",
+          "items": { "type": "object", "required": ["etiqueta", "valor"], "additionalProperties": false, "properties": { "etiqueta": { "type": "string" }, "valor": { "type": "string" } } }
+        }
+      }
+    },
+    "SalidaSerie": {
+      "type": "object",
+      "required": ["x", "series"],
+      "additionalProperties": true,
+      "properties": {
+        "titulo": { "type": "string" },
+        "unidad": { "type": "string" },
+        "tipo": { "enum": ["linea", "barras"] },
+        "x": { "type": "array", "items": { "type": "string" } },
+        "series": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": ["id", "etiqueta", "valores"],
+            "additionalProperties": false,
+            "properties": {
+              "id": { "type": "string" },
+              "etiqueta": { "type": "string" },
+              "valores": { "type": "array", "items": { "type": "string", "pattern": "^-?[0-9]+(\\.[0-9]+)?$" } }
+            }
+          }
+        }
+      }
+    },
+    "Anomalia": {
+      "type": "object",
+      "required": ["id", "titulo", "severidad", "por_que", "observado", "esperado"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string" },
+        "titulo": { "type": "string" },
+        "severidad": { "enum": ["baja", "media", "alta"] },
+        "por_que": { "type": "string" },
+        "observado": { "type": "string" },
+        "esperado": { "type": "string" },
+        "fecha": { "type": "string" }
+      }
+    },
+    "DetectarAnomaliasSalida": {
+      "type": "object",
+      "required": ["anomalias", "columnas", "filas"],
+      "additionalProperties": true,
+      "properties": {
+        "anomalias": { "type": "array", "items": { "$ref": "#/$defs/Anomalia" } },
+        "columnas": { "type": "array" },
+        "filas": { "type": "array" }
+      }
+    }
+  }
+}

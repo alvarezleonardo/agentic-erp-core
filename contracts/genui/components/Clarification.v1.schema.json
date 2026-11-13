@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agentic-erp.dev/genui/components/Clarification.v1.schema.json",
+  "title": "Clarification v1",
+  "description": "Pregunta cuando hay ambigüedad. Las opciones son ids reales devueltos por un tool de la misma intención: el orquestador las verifica.",
+  "type": "object",
+  "required": ["pregunta", "opciones"],
+  "additionalProperties": false,
+  "properties": {
+    "pregunta": { "type": "string", "minLength": 1, "maxLength": 200 },
+    "opciones": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 12,
+      "items": { "type": "object", "required": ["id", "etiqueta"], "additionalProperties": false, "properties": { "id": { "type": "string" }, "etiqueta": { "type": "string", "maxLength": 80 } } }
+    }
+  }
+}

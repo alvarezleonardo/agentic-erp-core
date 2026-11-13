@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agentic-erp.dev/genui/components/DetailCard.v1.schema.json",
+  "title": "DetailCard v1",
+  "description": "Ficha de un registro (par etiqueta/valor) hidratada desde SalidaDetalle.",
+  "type": "object",
+  "required": ["titulo", "campos"],
+  "additionalProperties": false,
+  "properties": {
+    "titulo": { "type": "string", "maxLength": 120, "x-source": "query" },
+    "campos": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 40,
+      "x-source": "query",
+      "items": { "type": "object", "required": ["etiqueta", "valor"], "additionalProperties": false, "properties": { "etiqueta": { "type": "string" }, "valor": { "type": "string" } } }
+    }
+  }
+}
