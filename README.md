@@ -34,6 +34,20 @@ Un agente que lee tu ERP es fácil. Uno en el que podés confiar para que prepar
 
 Los principios completos están en [ADR-001](docs/adr/ADR-001-principios.md).
 
+## Dónde encaja en el ciclo agéntico
+
+Ubicado en el ciclo que describen [IBM](https://www.ibm.com/mx-es/think/topics/agentic-ai) y [Google Cloud](https://cloud.google.com/discover/what-is-agentic-ai?hl=es-419), el núcleo cubre percepción, razonamiento, acción y orquestación; la acción llega solo hasta proponer y aprender queda afuera a propósito.
+
+| Etapa | Componentes |
+|---|---|
+| Percibir | `Router` (reglas en español y, si no alcanzan, clasificación por el modelo), `Permisos` por rol, contexto de sesión que inyecta `Herramientas` |
+| Razonar y planificar | El `AgentRunner` de cada agente de dominio (bucle acotado de 6 pasos), con el plan de dominios que arma el `Router` |
+| Actuar | Lecturas y tools `preparar_*` del agente; el `Compositor` arma la pantalla y la persona confirma. Solo el `Confirmador` llama a `confirmar_*` |
+| Aprender o adaptarse | No hay. `MemoriaIntencion` y `MemoriaSesion` guardan ids, foco y las últimas 5 intenciones para retomar el hilo; no cambian el comportamiento entre sesiones |
+| Orquestar | `Orquestador`: corre los agentes del plan en orden fijo; las trazas (`Trace`) dejan cada paso auditable |
+
+El núcleo no aprende ni se adapta solo, y es una decisión: en un ERP pesan más la previsibilidad y la auditoría que la autonomía. IBM define la IA agéntica como un sistema que logra un objetivo "bajo poca supervisión"; acá la supervisión es obligatoria en toda escritura.
+
 ## Arquitectura
 
 ```mermaid
