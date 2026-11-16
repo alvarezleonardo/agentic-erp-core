@@ -7,7 +7,7 @@ Framework (TypeScript) para agregarle una capa agéntica a un ERP sin dejar que 
 [![CI](https://github.com/alvarezleonardo/agentic-erp-core/actions/workflows/ci.yml/badge.svg)](https://github.com/alvarezleonardo/agentic-erp-core/actions/workflows/ci.yml)
 [![Licencia: MIT](https://img.shields.io/badge/licencia-MIT-blue.svg)](LICENSE)
 [![Node >=22](https://img.shields.io/badge/node-%3E%3D22-339933.svg)](.nvmrc)
-[![Versión 0.1.0](https://img.shields.io/badge/versi%C3%B3n-0.1.0-informational.svg)](CHANGELOG.md)
+[![Versión 0.1.1](https://img.shields.io/badge/versi%C3%B3n-0.1.1-informational.svg)](CHANGELOG.md)
 
 ![Demo: egreso de caja con confirmación por PIN](docs/demo/demo.gif)
 
@@ -17,7 +17,7 @@ La demo cuenta una idea: el modelo propone, pero no escribe ni pone montos; la p
 
 Un agente que lee tu ERP es fácil; uno en el que se pueda confiar para mover dinero, no. Los principios de [ADR-001](docs/adr/ADR-001-principios.md) lo resuelven con mecanismos y pruebas, no con confianza en el modelo: las escrituras se parten en `preparar_*` y `confirmar_*` y solo la persona confirma, los montos los pone el servidor, el modelo nunca ve el token ni el PIN, y toda corrida termina en una directiva final. Con [ADR-002](docs/adr/ADR-002-un-orquestador.md), la cobertura de un ERP completo sale de un orquestador con agentes de dominio acotados, no de un enjambre que se delega trabajo entre sí.
 
-*English summary:* a TypeScript framework to add an agent layer on top of any ERP exposed through MCP. One orchestrator with scoped agents (at most 15 tools each, never a swarm), a hybrid rules+LLM router, and a hard propose/confirm split: the model only calls `preparar_*` tools, the server computes every amount, confirmation tokens and PINs never reach the model, and every run ends in `render_ui`, `clarify` or `report_error`. Supervisor step-up (PIN and reason) travels from the screen to the server, never through the model. Ships with a synthetic ERP (sales, stock, purchases, cash), a terminal demo (`npm run demo`, offline, scripted LLM), a golden eval set (31 phrases) that runs offline with a scripted LLM and can also run against a real model with a spend cap, and security tests. Status: v0.1.0, MIT. Docs are in Spanish.
+*English summary:* a TypeScript framework to add an agent layer on top of any ERP exposed through MCP. One orchestrator with scoped agents (at most 15 tools each, never a swarm), a hybrid rules+LLM router, and a hard propose/confirm split: the model only calls `preparar_*` tools, the server computes every amount, confirmation tokens and PINs never reach the model, and every run ends in `render_ui`, `clarify` or `report_error`. Supervisor step-up (PIN and reason) travels from the screen to the server, never through the model. Ships with a synthetic ERP (sales, stock, purchases, cash), a terminal demo (`npm run demo`, offline, scripted LLM), a golden eval set (31 phrases) that runs offline with a scripted LLM and can also run against a real model with a spend cap, and security tests. Status: v0.1.1, MIT. Docs are in Spanish.
 
 ## Qué resuelve
 

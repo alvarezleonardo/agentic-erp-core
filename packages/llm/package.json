@@ -1,6 +1,6 @@
 {
   "name": "@agentic-erp/llm",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "type": "module",
   "description": "Interfaz LlmProvider, ScriptedProvider para pruebas, presupuesto de gasto y un adaptador de ejemplo.",
   "license": "MIT",

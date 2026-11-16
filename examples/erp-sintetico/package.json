@@ -1,6 +1,6 @@
 {
   "name": "@agentic-erp/example-erp-sintetico",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "type": "module",
   "description": "Servidor MCP de ejemplo con datos sintéticos deterministas de un ERP genérico (ventas, stock, compras, caja) y sus agentes.",
@@ -33,10 +33,10 @@
     "demo": "tsx src/demo.ts"
   },
   "dependencies": {
-    "@agentic-erp/core": "0.1.0",
-    "@agentic-erp/llm": "0.1.0",
-    "@agentic-erp/mcp-client": "0.1.0",
-    "@agentic-erp/mcp-contract": "0.1.0",
+    "@agentic-erp/core": "0.1.1",
+    "@agentic-erp/llm": "0.1.1",
+    "@agentic-erp/mcp-client": "0.1.1",
+    "@agentic-erp/mcp-contract": "0.1.1",
     "@modelcontextprotocol/sdk": "1.32.2",
     "ajv": "8.20.0"
   }
