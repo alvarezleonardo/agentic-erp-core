@@ -109,12 +109,6 @@ export const METRICAS: DefMetrica[] = [
   { id: 'faltante_caja', etiqueta: 'Faltante de caja', descripcion: 'Suma de lo que faltó en los arqueos del período (esperado menos contado, solo faltantes).', tipo: 'moneda', dimensiones: ['dia'], sentido_favorable: 'menor_es_mejor' },
 ];
 
-const ADVERTENCIA_STEP_UP: Readonly<Record<Exclude<StepUp, 'none'>, string>> = {
-  motivo: 'Los ingresos de 500.00 o más necesitan que indiques el motivo.',
-  supervisor: 'Los egresos de 500.00 o más necesitan la autorización de un supervisor.',
-  supervisor_y_motivo: 'Los egresos de 2000.00 o más necesitan la autorización de un supervisor y el motivo.',
-};
-
 /** Hash de relleno: verificar contra algo cuando el usuario no existe evita que el tiempo de respuesta delate qué usuarios hay. */
 const PIN_HASH_RELLENO = hashPin('relleno');
 
@@ -124,6 +118,7 @@ const fmt = (centavos: number): string => {
   return `${d.monto} ${d.moneda}`;
 };
 const dinero = (c: number): Dinero => dineroDeCentavos(c, MONEDA);
+const montoUmbral = (centavos: number): string => dinero(centavos).monto;
 
 /** Importe tal como lo escribe una persona: «150», «150.5», «150,50». Devuelve centavos. */
 export function parsearImporte(v: unknown): number {
@@ -175,6 +170,18 @@ export class ErpSintetico {
     this.umbralMotivoCaja = o.umbralesCaja?.supervisorYMotivo ?? UMBRAL_MOTIVO_CAJA;
     this.cierres = this.calcularCierres();
     this.sembrarEventos();
+  }
+
+  /** Texto de la advertencia de step-up de caja, con los umbrales efectivos de esta instancia. */
+  private advertenciaStepUpCaja(stepUp: Exclude<StepUp, 'none'>): string {
+    switch (stepUp) {
+      case 'motivo':
+        return `Los ingresos de ${montoUmbral(UMBRAL_STEP_UP_CAJA)} o más necesitan que indiques el motivo.`;
+      case 'supervisor':
+        return `Los egresos de ${montoUmbral(this.umbralSupervisorCaja)} o más necesitan la autorización de un supervisor.`;
+      case 'supervisor_y_motivo':
+        return `Los egresos de ${montoUmbral(this.umbralMotivoCaja)} o más necesitan la autorización de un supervisor y el motivo.`;
+    }
   }
 
   // ------------------------------------------------------------------ caja (base)
@@ -723,7 +730,7 @@ export class ErpSintetico {
         { etiqueta: 'Concepto', valor: concepto },
         { etiqueta: 'Fecha', valor: HOY },
       ],
-      ...(stepUp !== 'none' ? { advertencias: [ADVERTENCIA_STEP_UP[stepUp]] } : {}),
+      ...(stepUp !== 'none' ? { advertencias: [this.advertenciaStepUpCaja(stepUp)] } : {}),
     });
   }
 

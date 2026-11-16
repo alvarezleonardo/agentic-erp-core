@@ -124,6 +124,20 @@ describe('proponer y confirmar sobre el ERP real (en memoria)', () => {
     }
   });
 
+  it('la advertencia de la tarjeta de caja usa los umbrales configurados, y con los default conserva el texto de siempre', () => {
+    const preparar = (erp: ErpSintetico, tipo: string, importe: string): Obj => erp.prepararMovimientoCaja({ tipo, concepto: 'Pago de flete', importe }, contextoDe('supervisor', 'supervisor1')) as unknown as Obj;
+    const advertencias = (p: Obj): unknown => (p['card'] as Obj | undefined)?.['advertencias'] ?? p['advertencias'];
+
+    const propio = new ErpSintetico({ umbralesCaja: { supervisor: 5_000, supervisorYMotivo: 123_456 } });
+    expect(advertencias(preparar(propio, 'egreso', '60'))).toEqual(['Los egresos de 50.00 o más necesitan la autorización de un supervisor.']);
+    expect(advertencias(preparar(propio, 'egreso', '1300'))).toEqual(['Los egresos de 1234.56 o más necesitan la autorización de un supervisor y el motivo.']);
+
+    const porDefecto = new ErpSintetico();
+    expect(advertencias(preparar(porDefecto, 'egreso', '800'))).toEqual(['Los egresos de 500.00 o más necesitan la autorización de un supervisor.']);
+    expect(advertencias(preparar(porDefecto, 'egreso', '2500'))).toEqual(['Los egresos de 2000.00 o más necesitan la autorización de un supervisor y el motivo.']);
+    expect(advertencias(preparar(porDefecto, 'ingreso', '900'))).toEqual(['Los ingresos de 500.00 o más necesitan que indiques el motivo.']);
+  });
+
   it('un ingreso grande pide solo un motivo (sin supervisor) y nadie se autoriza a sí mismo', async () => {
     const erp = new ErpSintetico({ autorizadores: { supervisor1: { pin: PIN_SUPERVISOR_DE_PRUEBA, rol: 'supervisor' } } });
     const ing = erp.prepararMovimientoCaja({ tipo: 'ingreso', concepto: 'Aporte de socio', importe: '900' }, ctx('operador'));
