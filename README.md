@@ -37,17 +37,14 @@ Los principios completos están en [ADR-001](docs/adr/ADR-001-principios.md).
 ## Arquitectura
 
 ```mermaid
-flowchart LR
+flowchart TB
     P([Persona]) -->|texto| S[Superficie]
     S -->|user.input / ui.action| O[Orquestador]
     O --> R{Router<br/>reglas + LLM}
-    R --> A1[Agente ventas]
-    R --> A2[Agente stock]
-    R --> A3[Agente compras]
-    R --> A4[Agente caja]
-    A1 & A2 & A3 & A4 -->|tools de lectura y preparar_*| H[Herramientas<br/>inyecta contexto e idempotencia]
+    R --> A[Agentes de dominio<br/>ventas, stock, compras, caja]
+    A -->|tools de lectura y preparar_*| H[Herramientas<br/>inyecta contexto e idempotencia]
     H -->|MCP| E[(Servidor MCP del ERP<br/>fuente de verdad)]
-    A1 & A2 & A3 & A4 -->|directiva final| C[Compositor<br/>hidrata montos desde el servidor]
+    A -->|directiva final| C[Compositor<br/>hidrata montos desde el servidor]
     C -->|ui.render validado| S
     S -->|confirmar + token + PIN opcional| F[Confirmador]
     F -->|confirmar_*| H
@@ -118,6 +115,18 @@ Una superficie que declara el protocolo 1.1 puede mandar `user.input` con `coman
 ## Step-up
 
 Una propuesta puede exigir más que el toque de la persona: `motivo` (texto obligatorio), `supervisor` (usuario y PIN de otra persona con rol superior) o `supervisor_y_motivo`. La `ConfirmationCard` declara qué pide (`step_up`), el PIN y el motivo viajan de la pantalla al servidor dentro de `confirmar_*` (`autorizacion`) y el PIN no entra al modelo ni a las trazas. `@agentic-erp/mcp-contract` incluye un `hashPin`/`verificarPin` de referencia (scrypt) para el servidor. Ver [`CONTRACT.md`](packages/mcp-contract/CONTRACT.md).
+
+## Auditoría
+
+Cada intención deja una traza JSONL (`Trace`): router, agente, tools, propuestas y confirmación, con los secretos redactados. La demo imprime cuántos eventos registró y verifica que ni el token ni el PIN aparezcan en ella. Extracto real de una corrida (recortado a 5 de los 10 eventos, sin editar valores):
+
+```jsonl
+{"ts":"2026-11-16T15:12:47.805Z","trace_id":"tr_4ee8d42b","intent_id":"int_7ge5re10g87p","evento":"tool_llamada","agente":"caja","tool":"preparar_movimiento_caja","args":{"tipo":"egreso","concepto":"Limpieza","importe":"85"}}
+{"ts":"2026-11-16T15:12:47.809Z","trace_id":"tr_4ee8d42b","intent_id":"int_7ge5re10g87p","evento":"propuesta_guardada","agente":"caja","tool":"preparar_movimiento_caja","proposal_id":"prop_0001"}
+{"ts":"2026-11-16T15:12:47.819Z","trace_id":"tr_4ee8d42b","intent_id":"int_7ge5re10g87p","evento":"directiva_final","agente":"caja","directiva":"render_ui","componente":"ConfirmationCard","fuente":"prop_0001","valida":true}
+{"ts":"2026-11-16T15:12:47.823Z","trace_id":"tr_4ee8d42b","intent_id":"int_7ge5re10g87p","evento":"confirmacion_enviada","proposal_id":"prop_0001","tool":"confirmar_movimiento_caja","step_up":"supervisor","con_autorizacion":true}
+{"ts":"2026-11-16T15:12:47.896Z","trace_id":"tr_4ee8d42b","intent_id":"int_7ge5re10g87p","evento":"confirmacion_aplicada","proposal_id":"prop_0001","tool":"confirmar_movimiento_caja","idempotente":false}
+```
 
 ## Pruebas
 
