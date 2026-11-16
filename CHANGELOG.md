@@ -2,11 +2,18 @@
 
 Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y versionado semántico.
 
-## [Sin publicar]
+## [0.1.1] - 2026-11-16
+
+### Corregido
+
+- ERP sintético: la advertencia de la `ConfirmationCard` de caja usa los umbrales configurados en `umbralesCaja` en vez de un "500.00" fijo.
+
+### Agregado
 
 - La demo muestra la traza de auditoría (cantidad de eventos) y suma una quinta garantía: la traza no contiene el token ni el PIN.
-- README: sección "Auditoría" con un extracto real de la traza; diagrama de arquitectura en vertical.
 - Demo grabada: el primer cuadro ya muestra contenido, el cierre dura más y se publican también `demo.mp4` y `demo-final.png`.
+- README: sección "Dónde encaja en el ciclo agéntico", sección "Auditoría" con un extracto real de la traza y diagrama de arquitectura en vertical.
+- ADR-002: la decisión en el vocabulario de la IA agéntica (arquitectura vertical con conductor), el costo aceptado y cómo se cortan las fallas en cascada.
 
 ## [0.1.0] - 2026-11-13
 
