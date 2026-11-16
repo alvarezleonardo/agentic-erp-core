@@ -2,6 +2,12 @@
 
 Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y versionado semántico.
 
+## [Sin publicar]
+
+- La demo muestra la traza de auditoría (cantidad de eventos) y suma una quinta garantía: la traza no contiene el token ni el PIN.
+- README: sección "Auditoría" con un extracto real de la traza; diagrama de arquitectura en vertical.
+- Demo grabada: el primer cuadro ya muestra contenido, el cierre dura más y se publican también `demo.mp4` y `demo-final.png`.
+
 ## [0.1.0] - 2026-11-13
 
 Primera versión pública.

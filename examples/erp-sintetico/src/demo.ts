@@ -17,6 +17,8 @@ export interface SalidaDemo {
   resultado: Obj | undefined;
   /** Movimientos de caja con ese concepto ya registrados en el ERP. */
   registrados: number;
+  /** Eventos registrados en la traza de auditoría durante la corrida. */
+  eventosTraza: string[];
   /** Movimientos totales del ERP antes de proponer, tras proponer y tras confirmar. */
   movimientos: { inicio: number; trasPropuesta: number; final: number };
   /** Garantías verificadas en runtime (no texto fijo). */
@@ -138,6 +140,13 @@ export async function correrDemo(o: OpcionesDemo = {}): Promise<SalidaDemo> {
     out(`  ERP: ${verde(plural(finalMovs - inicio, ' nuevo'))}`);
     if (pausa) await dormir(pausa);
 
+    // --- Auditoría: la traza JSONL que el Orquestador ya escribe (Trace), con secretos redactados. ---
+    const eventos = d.trace.eventos;
+    const traceId = eventos[0]?.trace_id ?? '(sin traza)';
+    out(`  Auditoría: ${amarillo(`${eventos.length} eventos`)} en la traza ${traceId}`);
+    out(tenue('           una línea JSONL por evento, secretos redactados'));
+    if (pausa) await dormir(pausa);
+
     // --- Garantías: cada una sale de una comprobación real, no de texto fijo. ---
     const visto = llm.entradasSerializadas();
     const token = String(data['confirmation_token']);
@@ -160,6 +169,11 @@ export async function correrDemo(o: OpcionesDemo = {}): Promise<SalidaDemo> {
         texto: 'Se escribió solo después de confirmar: 1 movimiento, tras el PIN',
         ok: finalMovs === inicio + 1 && movs.length === 1 && td['nivel'] !== 'error',
       },
+      {
+        texto: 'La traza de auditoría no contiene el token ni el PIN',
+        // El PIN se busca como valor JSON (entre comillas): los ids aleatorios de la traza podrían contener esos dígitos.
+        ok: eventos.length > 0 && !d.trace.serializado().includes(token) && !d.trace.serializado().includes(JSON.stringify(pin)),
+      },
     ];
     const lineas = garantias.map((g) => `${g.ok ? verde('[ok]') : rojo('[FALLA]')} ${g.texto}`);
     const ancho = Math.max(...lineas.map(visible), 60) + 2;
@@ -171,7 +185,7 @@ export async function correrDemo(o: OpcionesDemo = {}): Promise<SalidaDemo> {
 
     const todoOk = garantias.every((g) => g.ok);
     if (!todoOk) out(rojo('[FALLA] al menos una garantía no se cumplió.'));
-    return { montoTarjeta: total, stepUp, resultado: toast, registrados: movs.length, movimientos: { inicio, trasPropuesta, final: finalMovs }, garantias, ok: todoOk };
+    return { montoTarjeta: total, stepUp, resultado: toast, registrados: movs.length, eventosTraza: eventos.map((e) => e.evento), movimientos: { inicio, trasPropuesta, final: finalMovs }, garantias, ok: todoOk };
   } finally {
     await d.cerrar();
   }

@@ -11,7 +11,8 @@ describe('demo de terminal', () => {
     expect(r.registrados).toBe(1);
     expect(r.movimientos.trasPropuesta).toBe(r.movimientos.inicio);
     expect(r.movimientos.final).toBe(r.movimientos.inicio + 1);
-    expect(r.garantias).toHaveLength(4);
+    expect(r.garantias).toHaveLength(5);
+    expect(r.eventosTraza.length).toBeGreaterThan(0);
     expect(r.garantias.every((g) => g.ok)).toBe(true);
     expect(r.ok).toBe(true);
     const texto = lineas.join('\n');
@@ -20,8 +21,11 @@ describe('demo de terminal', () => {
     expect(texto).toContain('importe: "85"');
     expect(texto).toContain('todavía no se escribió nada');
     expect(texto).toContain('****');
-    expect(texto).not.toContain('2468');
-    expect(texto.match(/\[ok\]/g)).toHaveLength(4);
+    // Se quita el trace_id (hex aleatorio) para que el chequeo del PIN no dependa del azar.
+    expect(texto.replace(/tr_[0-9a-f]+/g, '')).not.toContain('2468');
+    expect(texto.match(/\[ok\]/g)).toHaveLength(5);
+    expect(texto).toContain('Auditoría:');
+    expect(texto).toContain('no contiene el token ni el PIN');
     expect(texto).not.toContain('[FALLA]');
   });
 

@@ -1,5 +1,6 @@
 # Genera docs/demo/demo.gif:  vhs docs/demo/demo.tape   (desde la raíz del repo)
 Output docs/demo/demo.gif
+Output docs/demo/demo.mp4
 
 Set Shell "bash"
 Set Theme "Dracula"
@@ -14,11 +15,12 @@ Set PlaybackSpeed 1
 Hide
 Type "export PS1='$ ' DEMO_PAUSA_MS=1800 && clear"
 Enter
-Show
+Sleep 300ms
 
-Sleep 600ms
 Type "npm run demo --silent"
+Show
 Sleep 400ms
 Enter
-Sleep 13s
-Sleep 6s
+Sleep 17s
+Screenshot docs/demo/demo-final.png
+Sleep 11s
