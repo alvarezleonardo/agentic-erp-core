@@ -171,7 +171,8 @@ export async function correrDemo(o: OpcionesDemo = {}): Promise<SalidaDemo> {
       },
       {
         texto: 'La traza de auditoría no contiene el token ni el PIN',
-        ok: eventos.length > 0 && !d.trace.serializado().includes(token) && !d.trace.serializado().includes(pin),
+        // El PIN se busca como valor JSON (entre comillas): los ids aleatorios de la traza podrían contener esos dígitos.
+        ok: eventos.length > 0 && !d.trace.serializado().includes(token) && !d.trace.serializado().includes(JSON.stringify(pin)),
       },
     ];
     const lineas = garantias.map((g) => `${g.ok ? verde('[ok]') : rojo('[FALLA]')} ${g.texto}`);

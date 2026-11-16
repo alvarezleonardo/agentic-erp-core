@@ -21,7 +21,8 @@ describe('demo de terminal', () => {
     expect(texto).toContain('importe: "85"');
     expect(texto).toContain('todavía no se escribió nada');
     expect(texto).toContain('****');
-    expect(texto).not.toContain('2468');
+    // Se quita el trace_id (hex aleatorio) para que el chequeo del PIN no dependa del azar.
+    expect(texto.replace(/tr_[0-9a-f]+/g, '')).not.toContain('2468');
     expect(texto.match(/\[ok\]/g)).toHaveLength(5);
     expect(texto).toContain('Auditoría:');
     expect(texto).toContain('no contiene el token ni el PIN');
