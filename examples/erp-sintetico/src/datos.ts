@@ -248,6 +248,35 @@ export interface TransferenciaInterna {
 export const saldoDeCuenta = (cuenta: CuentaBancaria, movimientos: readonly MovimientoBancario[]): number =>
   cuenta.saldo_inicial + movimientos.filter((m) => m.cuenta_id === cuenta.id).reduce((s, m) => s + (m.sentido === 'credito' ? m.importe : -m.importe), 0);
 
+export const LISTA_MINORISTA = 'lp_01';
+export const LISTA_MAYORISTA = 'lp_02';
+export const LISTA_DISTRIBUIDORES = 'lp_03';
+
+/** Lista de precios. El precio de la lista Minorista es el del propio artículo (`Articulo.precio`); el de las demás, un `PrecioLista`. */
+export interface ListaPrecios {
+  id: string;
+  nombre: string;
+}
+
+/** Precio de un artículo en una lista que no es la Minorista. Centavos. */
+export interface PrecioLista {
+  lista_id: string;
+  articulo_id: string;
+  precio: number;
+}
+
+/** Un cambio de precio de un artículo en una lista. Importes en centavos. */
+export interface CambioPrecio {
+  id: string;
+  articulo_id: string;
+  lista_id: string;
+  precio_anterior: number;
+  precio_nuevo: number;
+  fecha: string;
+  usuario: string;
+  motivo: string;
+}
+
 export interface DatosErp {
   proveedores: Proveedor[];
   articulos: Articulo[];
@@ -270,6 +299,12 @@ export interface DatosErp {
   movimientosBancarios: MovimientoBancario[];
   /** Transferencias internas registradas con el ERP. Arranca vacío. */
   transferenciasInternas: TransferenciaInterna[];
+  /** Listas de precios (precios y listas). */
+  listasPrecios: ListaPrecios[];
+  /** Precios de las listas Mayorista y Distribuidores, un registro por artículo (ver `generarPrecios`). */
+  preciosLista: PrecioLista[];
+  /** Historial de cambios de precio: los sembrados más los que se confirmen con el ERP. */
+  cambiosPrecio: CambioPrecio[];
 }
 
 /** Generador pseudoaleatorio determinista (mulberry32). */
@@ -382,6 +417,7 @@ export function generarDatos(): DatosErp {
     pagosProveedor: [],
     ...generarTesoreria(movimientos, facturasProveedor, facturacion.clientes),
     transferenciasInternas: [],
+    ...generarPrecios(),
   };
 }
 
@@ -612,5 +648,59 @@ function generarTesoreria(movimientosCaja: MovimientoCaja[], facturasProveedor: 
   return {
     cuentasBancarias: CUENTAS.map((c) => ({ ...c })),
     movimientosBancarios: ordenados.map((m, i) => ({ id: `mba_${String(i + 1).padStart(4, '0')}`, ...m })),
+  };
+}
+
+
+// ------------------------------------------------------------------------------------------------------ precios y listas
+
+/** Redondeo de precios del ejemplo: al múltiplo de 5 centavos más cercano (las mitades suben). */
+export const redondear5 = (centavos: number): number => Math.round(centavos / 5) * 5;
+
+/** Factores de las listas derivadas, en milésimas del precio Minorista: Mayorista 90 % y Distribuidores 82 %. */
+const MILESIMAS_MAYORISTA = 900;
+const MILESIMAS_DISTRIBUIDORES = 820;
+
+/** Casos sembrados a propósito, para que `articulos_margen_bajo` tenga algo que encontrar (el margen mínimo por defecto es 15 %). */
+export const ARTICULO_BAJO_COSTO = 'art_003'; // Monitor 24 pulgadas, lista Distribuidores: 119.00 con un costo de 124.00
+export const ARTICULO_MARGEN_BAJO = 'art_002'; // Escritorio ajustable, lista Mayorista: 209.00 con un costo de 195.00 (margen 6,7 %)
+const PRECIOS_FIJOS: Record<string, number> = {
+  [`${LISTA_DISTRIBUIDORES}:${ARTICULO_BAJO_COSTO}`]: 11_900,
+  [`${LISTA_MAYORISTA}:${ARTICULO_MARGEN_BAJO}`]: 20_900,
+};
+
+/**
+ * Listas de precios. No usa el generador pseudoaleatorio: todo sale de los artículos, así que no altera ni un número de los datos
+ * anteriores. Las ventas del ejemplo ya están generadas y guardan su importe: un cambio de precio posterior no las reescribe.
+ * - Minorista es el precio del artículo. Mayorista y Distribuidores son el 90 % y el 82 % de ese precio, redondeados a 5 centavos.
+ * - Dos excepciones sembradas (ver `PRECIOS_FIJOS`): el Monitor en Distribuidores queda por debajo del costo y el Escritorio ajustable
+ *   en Mayorista queda con un margen muy bajo.
+ * - Historial: unos pocos cambios de 2025 (antes de los datos de ventas) en el teclado mecánico y el mouse, y dos de 2026 que explican
+ *   las excepciones. El último cambio de cada par artículo-lista termina siempre en el precio vigente.
+ */
+export function generarPrecios(): Pick<DatosErp, 'listasPrecios' | 'preciosLista' | 'cambiosPrecio'> {
+  const listas: ListaPrecios[] = [
+    { id: LISTA_MINORISTA, nombre: 'Minorista' },
+    { id: LISTA_MAYORISTA, nombre: 'Mayorista' },
+    { id: LISTA_DISTRIBUIDORES, nombre: 'Distribuidores' },
+  ];
+  const derivado = (a: Articulo, lista: string, milesimas: number): number => PRECIOS_FIJOS[`${lista}:${a.id}`] ?? redondear5((a.precio * milesimas) / 1000);
+  const preciosLista: PrecioLista[] = ARTICULOS.flatMap((a) => [
+    { lista_id: LISTA_MAYORISTA, articulo_id: a.id, precio: derivado(a, LISTA_MAYORISTA, MILESIMAS_MAYORISTA) },
+    { lista_id: LISTA_DISTRIBUIDORES, articulo_id: a.id, precio: derivado(a, LISTA_DISTRIBUIDORES, MILESIMAS_DISTRIBUIDORES) },
+  ]);
+  const vigente = (lista: string, articulo: string): number => (lista === LISTA_MINORISTA ? ARTICULOS.find((a) => a.id === articulo)?.precio : preciosLista.find((p) => p.lista_id === lista && p.articulo_id === articulo)?.precio) ?? 0;
+  const base: Omit<CambioPrecio, 'id'>[] = [
+    { articulo_id: 'art_004', lista_id: LISTA_MINORISTA, precio_anterior: 8_200, precio_nuevo: 8_500, fecha: '2025-10-06', usuario: 'supervisor1', motivo: 'Aumento del proveedor' },
+    { articulo_id: 'art_004', lista_id: LISTA_MINORISTA, precio_anterior: 8_500, precio_nuevo: vigente(LISTA_MINORISTA, 'art_004'), fecha: '2025-12-02', usuario: 'gerente1', motivo: 'Ajuste de fin de año' },
+    { articulo_id: 'art_004', lista_id: LISTA_MAYORISTA, precio_anterior: 7_650, precio_nuevo: vigente(LISTA_MAYORISTA, 'art_004'), fecha: '2025-12-02', usuario: 'gerente1', motivo: 'Ajuste de fin de año' },
+    { articulo_id: 'art_005', lista_id: LISTA_MINORISTA, precio_anterior: 2_700, precio_nuevo: vigente(LISTA_MINORISTA, 'art_005'), fecha: '2025-11-10', usuario: 'supervisor1', motivo: 'Actualización de costos' },
+    { articulo_id: ARTICULO_BAJO_COSTO, lista_id: LISTA_DISTRIBUIDORES, precio_anterior: redondear5((ARTICULOS.find((a) => a.id === ARTICULO_BAJO_COSTO)!.precio * MILESIMAS_DISTRIBUIDORES) / 1000), precio_nuevo: vigente(LISTA_DISTRIBUIDORES, ARTICULO_BAJO_COSTO), fecha: '2026-02-20', usuario: 'gerente1', motivo: 'Igualar la oferta de un competidor' },
+    { articulo_id: ARTICULO_MARGEN_BAJO, lista_id: LISTA_MAYORISTA, precio_anterior: redondear5((ARTICULOS.find((a) => a.id === ARTICULO_MARGEN_BAJO)!.precio * MILESIMAS_MAYORISTA) / 1000), precio_nuevo: vigente(LISTA_MAYORISTA, ARTICULO_MARGEN_BAJO), fecha: '2026-03-02', usuario: 'supervisor1', motivo: 'Liquidación de stock del proveedor' },
+  ];
+  return {
+    listasPrecios: listas,
+    preciosLista,
+    cambiosPrecio: base.map((c, i) => ({ id: `cpr_${String(i + 1).padStart(4, '0')}`, ...c })),
   };
 }

@@ -311,6 +311,42 @@ export const TOOLS: DefTool[] = [
     manejar: (a, c, erp) => ({ ...erp.prepararTransferenciaInterna(a, c) }),
   },
   { nombre: 'confirmar_transferencia_interna', descripcion: 'Confirma una transferencia interna preparada. Lo llama el orquestador tras el toque de la persona.', esquema: confirmarEsquema(), manejar: async (a, c, erp) => ({ ...(await erp.confirmar('transferencia_interna', a, c)) }) },
+  // ---- precios y listas
+  {
+    nombre: 'listar_precios',
+    descripcion: 'Precios vigentes por lista (Minorista, Mayorista, Distribuidores), categoría o artículo, con el costo y el margen % calculados por el servidor. Sin lista, trae todas. La lista se indica por nombre o código.',
+    esquema: entrada({ lista: { type: 'string' }, categoria: { type: 'string' }, articulo_id: { type: 'string' } }),
+    manejar: (a, _c, erp) => ({ ...erp.listarPrecios(a) }),
+  },
+  {
+    nombre: 'historial_precios',
+    descripcion: 'Historial de cambios de precio de un artículo (antes, después, variación, quién y por qué), del más reciente al más viejo. Con lista, solo esa lista. El artículo se busca antes con buscar_articulos.',
+    esquema: entrada({ articulo_id: { type: 'string' }, lista: { type: 'string' }, limite: { type: 'integer', minimum: 1, maximum: 200 } }, ['articulo_id']),
+    manejar: (a, _c, erp) => ({ ...erp.historialPrecios(a) }),
+  },
+  {
+    nombre: 'articulos_margen_bajo',
+    descripcion: 'Artículos cuyo margen (precio menos costo, sobre el precio) en alguna lista está por debajo de un mínimo, del peor al mejor; incluye los que están bajo el costo. Sin margen_minimo_pct usa el mínimo configurado del ERP.',
+    esquema: entrada({ margen_minimo_pct: { type: ['string', 'number'], description: 'Margen mínimo en porcentaje, por ejemplo 15.' }, lista: { type: 'string' } }),
+    manejar: (a, _c, erp) => ({ ...erp.articulosMargenBajo(a) }),
+  },
+  {
+    nombre: 'preparar_cambio_precio',
+    descripcion: 'Prepara el cambio de precio de uno o varios artículos en una lista (articulo_ids o toda una categoria). modo precio: valor es el precio nuevo; porcentaje: valor es el porcentaje (8 sube 8 %, -5 baja 5 %); margen: alinea el precio al margen valor % sobre el costo. El servidor calcula los precios nuevos (redondeo a 5 centavos), rechaza precios en cero o negativos, advierte si algún artículo queda bajo el costo y calcula el margen resultante. Los cambios de más del umbral de variación, los masivos y los que dejan un precio bajo el costo necesitan la confirmación de un supervisor (y el motivo en el último caso). No se registra hasta que la persona confirma.',
+    esquema: entrada(
+      {
+        lista: { type: 'string', description: 'Nombre o código de la lista.' },
+        modo: { enum: ['precio', 'porcentaje', 'margen'] },
+        valor: { type: ['string', 'number'], description: 'Precio nuevo, porcentaje o margen, tal como lo dijo la persona, sin símbolos.' },
+        articulo_ids: { type: 'array', minItems: 1, maxItems: 100, items: { type: 'string' } },
+        categoria: { type: 'string' },
+        motivo: { type: 'string', minLength: 3, maxLength: 200 },
+      },
+      ['lista', 'modo', 'valor'],
+    ),
+    manejar: (a, c, erp) => ({ ...erp.prepararCambioPrecio(a, c) }),
+  },
+  { nombre: 'confirmar_cambio_precio', descripcion: 'Confirma un cambio de precios preparado. Lo llama el orquestador tras el toque de la persona.', esquema: confirmarEsquema(), manejar: async (a, c, erp) => ({ ...(await erp.confirmar('cambio_precio', a, c)) }) },
 ];
 
 export const toolsMcp = (): ToolMcp[] => TOOLS.map((t) => ({ nombre: t.nombre, descripcion: t.descripcion, esquema: t.esquema }));
