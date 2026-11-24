@@ -142,6 +142,8 @@ Cada intención deja una traza JSONL (`Trace`): router, agente, tools, propuesta
 {"ts":"2026-11-16T15:12:47.896Z","trace_id":"tr_4ee8d42b","intent_id":"int_7ge5re10g87p","evento":"confirmacion_aplicada","proposal_id":"prop_0001","tool":"confirmar_movimiento_caja","idempotente":false}
 ```
 
+Tres trazas completas (camino feliz, PIN incorrecto y reintento) en [`docs/ejemplos/auditoria.md`](docs/ejemplos/auditoria.md); se regeneran con `npm run ejemplo:auditoria`.
+
 ## Pruebas
 
 - Pruebas unitarias y de integración por paquete.
