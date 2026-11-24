@@ -70,7 +70,7 @@ El modelo ve únicamente el camino superior. La flecha de confirmación sale de 
 
 ## Agentes por área
 
-Cada área (ventas, stock, compras, caja, facturación, cobranzas) es un agente con su propia carpeta, su playbook en Markdown y su página con frases de ejemplo que los evals verifican. Ver [docs/agentes](docs/agentes/README.md), que incluye cómo sumar un área.
+Cada área (ventas, stock, compras, caja, facturación, cobranzas, pagos a proveedores) es un agente con su propia carpeta, su playbook en Markdown y su página con frases de ejemplo que los evals verifican. Ver [docs/agentes](docs/agentes/README.md), que incluye cómo sumar un área.
 
 ## Estructura
 
@@ -81,9 +81,9 @@ packages/
   mcp-contract/  tipos, JSON Schema, verificación de conformidad, kit de servidor (token, idempotencia, credencial) y CONTRACT.md
   mcp-client/    cliente MCP (stdio, HTTP, en memoria) y cliente compuesto
 contracts/genui/ componentes genéricos versionados (JSON Schema)
-examples/erp-sintetico/  ERP determinista (ventas, stock, compras, caja, facturación, cobranzas) + reglas del router
+examples/erp-sintetico/  ERP determinista (ventas, stock, compras, caja, facturación, cobranzas, pagos a proveedores) + reglas del router
   src/agentes/<área>/    un agente por carpeta: agente.ts y playbook.md (el prompt)
-evals/           38 frases doradas, runner y reporte
+evals/           52 frases doradas, runner y reporte
 tests/           pruebas de seguridad de punta a punta
 docs/adr/        decisiones de diseño
 docs/agentes/    catálogo de agentes por área, con frases de ejemplo probadas por los evals

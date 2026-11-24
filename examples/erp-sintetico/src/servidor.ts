@@ -219,6 +219,53 @@ export const TOOLS: DefTool[] = [
     manejar: (a, c, erp) => ({ ...erp.prepararCobranza(a, c) }),
   },
   { nombre: 'confirmar_cobranza', descripcion: 'Confirma una cobranza preparada. Lo llama el orquestador tras el toque de la persona.', esquema: confirmarEsquema(), manejar: async (a, c, erp) => ({ ...(await erp.confirmar('cobranza', a, c)) }) },
+  // ---- pagos a proveedores
+  {
+    nombre: 'buscar_proveedores',
+    descripcion: 'Busca proveedores por nombre. Devuelve los códigos (proveedor_id) con su plazo y lo que se les debe. Usala antes de cualquier consulta o pago a un proveedor: si coinciden varios, hay que preguntar cuál.',
+    esquema: entrada({ texto: { type: 'string', minLength: 2, description: 'Parte del nombre del proveedor.' } }, ['texto']),
+    manejar: (a, _c, erp) => ({ ...erp.buscarProveedores(a['texto']) }),
+  },
+  {
+    nombre: 'listar_cuentas_a_pagar',
+    descripcion: 'Facturas de proveedores con saldo pendiente, ordenadas por vencimiento, con importe, pagado y saldo de cada una. Se filtra por proveedor, solo las vencidas o las que vencen dentro de N días.',
+    esquema: entrada({ proveedor_id: { type: 'string' }, solo_vencidas: { type: 'boolean' }, vence_en_dias: { type: 'integer', minimum: 0, maximum: 365, description: 'Solo las que vencen entre hoy y hoy más estos días.' }, limite: { type: 'integer', minimum: 1, maximum: 50 } }),
+    manejar: (a, _c, erp) => ({ ...erp.listarCuentasAPagar(a) }),
+  },
+  {
+    nombre: 'estado_cuenta_proveedor',
+    descripcion: 'Estado de cuenta de un proveedor: saldo a pagar, vencido, lo que vence esta semana y después, pagos a la espera del débito bancario y cada factura con saldo. Pide el proveedor_id que devuelve buscar_proveedores.',
+    esquema: entrada({ proveedor_id: { type: 'string' } }, ['proveedor_id']),
+    manejar: (a, _c, erp) => ({ ...erp.estadoCuentaProveedor(a) }),
+  },
+  {
+    nombre: 'vencimientos_proximos',
+    descripcion: 'Agenda de pagos: facturas de proveedores que vencen entre hoy y los próximos N días (7 por defecto), con el total y lo que ya está vencido. Opcionalmente de un solo proveedor.',
+    esquema: entrada({ dias: { type: 'integer', minimum: 0, maximum: 90 }, proveedor_id: { type: 'string' } }),
+    manejar: (a, _c, erp) => ({ ...erp.vencimientosProximos(a) }),
+  },
+  {
+    nombre: 'listar_pagos_proveedor',
+    descripcion: 'Pagos a proveedores registrados, filtrados por proveedor y período, con medio, importe y si la transferencia sigue pendiente de débito bancario.',
+    esquema: entrada({ proveedor_id: { type: 'string' }, desde: FECHA, hasta: FECHA }),
+    manejar: (a, _c, erp) => ({ ...erp.listarPagosProveedor(a) }),
+  },
+  {
+    nombre: 'preparar_pago_proveedor',
+    descripcion: 'Prepara el pago a UN proveedor con su medio (efectivo o transferencia). Se indica el importe, o las facturas (facturas), o el alcance (vencidas, vencen_esta_semana); con facturas o alcance y sin importe se paga el saldo completo de ese conjunto. El servidor lo reparte de la factura que vence primero a la que vence último, calcula lo que queda y rechaza importes mayores a la deuda. En efectivo, al confirmar también sale de la caja; una transferencia queda pendiente de débito bancario. Los pagos grandes necesitan la confirmación de un supervisor y los más grandes también un motivo. No se registra hasta que la persona confirma.',
+    esquema: entrada(
+      {
+        proveedor_id: { type: 'string' },
+        medio: { enum: ['efectivo', 'transferencia'] },
+        importe: { type: ['string', 'number'], description: 'Importe tal como lo dijo la persona, sin símbolo de moneda. Sin importe se paga el saldo completo de las facturas o el alcance.' },
+        facturas: { type: 'array', minItems: 1, maxItems: 30, items: { type: 'string' }, description: 'Códigos (factura_id) o números de las facturas a pagar.' },
+        alcance: { enum: ['vencidas', 'vencen_esta_semana'] },
+      },
+      ['proveedor_id', 'medio'],
+    ),
+    manejar: (a, c, erp) => ({ ...erp.prepararPagoProveedor(a, c) }),
+  },
+  { nombre: 'confirmar_pago_proveedor', descripcion: 'Confirma un pago a proveedor preparado. Lo llama el orquestador tras el toque de la persona.', esquema: confirmarEsquema(), manejar: async (a, c, erp) => ({ ...(await erp.confirmar('pago_proveedor', a, c)) }) },
 ];
 
 export const toolsMcp = (): ToolMcp[] => TOOLS.map((t) => ({ nombre: t.nombre, descripcion: t.descripcion, esquema: t.esquema }));

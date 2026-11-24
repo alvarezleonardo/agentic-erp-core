@@ -9,6 +9,7 @@ export const DOMINIOS: DominioDef[] = [
   { nombre: 'caja', descripcion: 'Estado de la caja, movimientos de caja, arqueos, faltantes y sobrantes' },
   { nombre: 'facturacion', descripcion: 'Clientes, facturas de venta, saldo de cada factura, total facturado y notas de crédito' },
   { nombre: 'cobranzas', descripcion: 'Cuánto debe cada cliente (estado de cuenta, deudores, antigüedad de la deuda, límite de crédito) y registro de cobros' },
+  { nombre: 'pagos', descripcion: 'Cuánto se le debe a cada proveedor (cuentas a pagar, vencimientos, agenda de pagos) y registro de pagos a proveedores' },
 ];
 
 /**
@@ -26,13 +27,16 @@ export const REGLAS: ReglaRouter[] = [
   { dominio: 'facturacion', patron: /\bfactur\w*|\bnotas? de credito\b|\bcomprobantes?\b/ },
   // Cobranzas: deuda de clientes y cobros. «cobrada/cobrado» (estado de una factura) queda en facturación; acá van los verbos y «cobro/cobranza».
   { dominio: 'cobranzas', patron: /\bcobros?\b|\bcobre\b|\bcobramos\b|\bcobranzas?\b|\bdeudor\w*|\bmoros\w*|\bnos deb\w*|\bcuanto deb\w*|\bestado de cuenta\b|\blimite de credito\b/ },
+  // Pagos: «pagale/pagá/pagar» y los vencimientos de proveedores. «pagá las facturas vencidas» también dispara facturación por «factur\w*»: por eso la regla de pagar es exclusiva.
+  { dominio: 'pagos', exclusiva: true, patron: /\bpagal[eo]s?\b|\bpaga\b|\bpagar\b|\bpagame\b/ },
+  { dominio: 'pagos', patron: /\bpagos?\b|\bcuentas? a pagar\b|\bdebemos\b|\bvencimientos?\b/ },
 ];
 
 export function crearRouter(llm?: LlmProvider): Router {
   const opciones: OpcionesRouter = {
     dominios: DOMINIOS,
     reglas: REGLAS,
-    descripcionDelNegocio: 'El negocio vende artículos de oficina y tecnología en tienda y online; el ERP lleva ventas, stock, compras, caja, facturación a clientes y cobranzas.',
+    descripcionDelNegocio: 'El negocio vende artículos de oficina y tecnología en tienda y online; el ERP lleva ventas, stock, compras, caja, facturación a clientes, cobranzas y pagos a proveedores.',
     ...(llm ? { llm } : {}),
   };
   return new Router(opciones);

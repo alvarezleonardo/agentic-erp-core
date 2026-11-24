@@ -33,7 +33,7 @@ import {
   type StepUp,
   type ValorMetrica,
 } from '@agentic-erp/mcp-contract';
-import { ANOMALIA_CAJA, HOY, INICIO_DATOS, MONEDA, estadoDeFactura, generarDatos, saldoDeFactura, type Articulo, type Cliente, type Cobranza, type DatosErp, type Factura, type MedioCobro, type MovimientoCaja, type NotaCredito, type OrdenCompra } from './datos.js';
+import { ANOMALIA_CAJA, HOY, INICIO_DATOS, MONEDA, estadoDeFactura, estadoDeFacturaProveedor, generarDatos, saldoDeFactura, saldoDeFacturaProveedor, type Articulo, type Cliente, type Cobranza, type DatosErp, type Factura, type FacturaProveedor, type MedioCobro, type MedioPago, type MovimientoCaja, type NotaCredito, type OrdenCompra, type PagoProveedor, type Proveedor } from './datos.js';
 import { diaDeSemana, diasEntre, esFecha, rango, sumarDias } from './fechas.js';
 import { ROLES_AUTORIZADORES, ROLES_POR_ESCRITURA } from './permisos.js';
 
@@ -63,6 +63,10 @@ export interface OpcionesErp {
   umbralNotaCredito?: number;
   /** Importe de cobranza, en centavos, desde el cual se pide la confirmación de un supervisor. Por defecto 5000.00. */
   umbralCobranza?: number;
+  /** Importe de pago a proveedor, en centavos, desde el cual se pide la confirmación de un supervisor. Por defecto 1000.00. */
+  umbralPagoProveedor?: number;
+  /** Importe de pago a proveedor, en centavos, desde el cual se pide además el motivo. Por defecto 5000.00. */
+  umbralMotivoPagoProveedor?: number;
 }
 
 type Efecto =
@@ -70,7 +74,8 @@ type Efecto =
   | { tipo: 'orden_compra'; proveedor_id: string; lineas: { articulo_id: string; cantidad: number; costo_unitario: number }[] }
   | { tipo: 'movimiento_caja'; mov: Omit<MovimientoCaja, 'id' | 'fecha'> }
   | { tipo: 'nota_credito'; factura_id: string; importe: number; motivo: string }
-  | { tipo: 'cobranza'; cliente_id: string; medio: MedioCobro; importe: number };
+  | { tipo: 'cobranza'; cliente_id: string; medio: MedioCobro; importe: number }
+  | { tipo: 'pago_proveedor'; proveedor_id: string; medio: MedioPago; importe: number; factura_ids: string[] };
 
 interface PropuestaGuardada {
   id: string;
@@ -108,6 +113,10 @@ const UMBRAL_STEP_UP_COMPRA = 500_000; // 5000.00
 const UMBRAL_DIFERENCIA_CAJA = 1_000; // 10.00
 const UMBRAL_STEP_UP_NOTA_CREDITO = 100_000; // 1000.00: notas de crédito desde acá piden un supervisor
 const UMBRAL_STEP_UP_COBRANZA = 500_000; // 5000.00: cobranzas desde acá piden un supervisor
+const UMBRAL_STEP_UP_PAGO_PROVEEDOR = 100_000; // 1000.00: pagos desde acá piden un supervisor
+const UMBRAL_MOTIVO_PAGO_PROVEEDOR = 500_000; // 5000.00: pagos desde acá piden supervisor y motivo
+const MEDIOS_PAGO: readonly MedioPago[] = ['efectivo', 'transferencia'];
+const ETIQUETA_MEDIO_PAGO: Record<MedioPago, string> = { efectivo: 'Efectivo', transferencia: 'Transferencia' };
 const MEDIOS_COBRO: readonly MedioCobro[] = ['efectivo', 'transferencia', 'cheque'];
 const ETIQUETA_MEDIO: Record<MedioCobro, string> = { efectivo: 'Efectivo', transferencia: 'Transferencia', cheque: 'Cheque' };
 
@@ -171,6 +180,8 @@ export class ErpSintetico {
   private readonly umbralMotivoCaja: number;
   private readonly umbralNotaCredito: number;
   private readonly umbralCobranza: number;
+  private readonly umbralPagoProveedor: number;
+  private readonly umbralMotivoPagoProveedor: number;
 
   constructor(o: OpcionesErp = {}) {
     this.datos = o.datos ?? generarDatos();
@@ -182,6 +193,8 @@ export class ErpSintetico {
     this.umbralMotivoCaja = o.umbralesCaja?.supervisorYMotivo ?? UMBRAL_MOTIVO_CAJA;
     this.umbralNotaCredito = o.umbralNotaCredito ?? UMBRAL_STEP_UP_NOTA_CREDITO;
     this.umbralCobranza = o.umbralCobranza ?? UMBRAL_STEP_UP_COBRANZA;
+    this.umbralPagoProveedor = o.umbralPagoProveedor ?? UMBRAL_STEP_UP_PAGO_PROVEEDOR;
+    this.umbralMotivoPagoProveedor = o.umbralMotivoPagoProveedor ?? UMBRAL_MOTIVO_PAGO_PROVEEDOR;
     this.cierres = this.calcularCierres();
     this.sembrarEventos();
   }
@@ -974,6 +987,181 @@ export class ErpSintetico {
     };
   }
 
+
+  // ------------------------------------------------------------------ proveedores y pagos (cuentas a pagar)
+
+  private proveedor(id: unknown): Proveedor {
+    const p = this.datos.proveedores.find((x) => x.id === id);
+    if (!p) throw new ErrorErp('NO_ENCONTRADO', `No existe el proveedor ${String(id)}.`, 'Buscá el proveedor por nombre y probá de nuevo.');
+    return p;
+  }
+
+  /** Domingo de la semana de HOY: «esta semana» llega hasta ahí. */
+  private finDeSemana(): string {
+    return sumarDias(HOY, (7 - diaDeSemana(HOY)) % 7);
+  }
+
+  private facturaProveedorPor(ref: string): FacturaProveedor | undefined {
+    return this.datos.facturasProveedor.find((f) => f.id === ref || f.numero === ref);
+  }
+
+  private saldoProveedor(proveedorId: string): number {
+    return sumarCentavos(this.datos.facturasProveedor.filter((f) => f.proveedor_id === proveedorId).map((f) => saldoDeFacturaProveedor(f)));
+  }
+
+  /** Facturas con saldo, la que vence primero primero: es el orden en que se imputa un pago. */
+  private cuentasAbiertas(proveedorId?: string): FacturaProveedor[] {
+    return this.datos.facturasProveedor
+      .filter((f) => (!proveedorId || f.proveedor_id === proveedorId) && saldoDeFacturaProveedor(f) > 0)
+      .sort((x, y) => x.vencimiento.localeCompare(y.vencimiento) || x.fecha.localeCompare(y.fecha) || x.numero.localeCompare(y.numero));
+  }
+
+  private situacionPago(f: FacturaProveedor): 'pagada' | 'vencida' | 'vence_hoy' | 'a_vencer' {
+    if (saldoDeFacturaProveedor(f) <= 0) return 'pagada';
+    return f.vencimiento < HOY ? 'vencida' : f.vencimiento === HOY ? 'vence_hoy' : 'a_vencer';
+  }
+
+  private etiquetaFacturaProveedor(f: FacturaProveedor): string {
+    return f.numero;
+  }
+
+  /** Otra factura abierta del mismo proveedor con el mismo número e importe: casi seguro una carga doble. */
+  private duplicadasDe(f: FacturaProveedor): FacturaProveedor[] {
+    return this.datos.facturasProveedor.filter((o) => o.id !== f.id && o.proveedor_id === f.proveedor_id && o.numero === f.numero && o.importe === f.importe && saldoDeFacturaProveedor(o) > 0);
+  }
+
+  private columnasCuentasAPagar(): SalidaTabla['columnas'] {
+    return [
+      { id: 'factura_id', etiqueta: 'Código', tipo: 'texto' },
+      { id: 'numero', etiqueta: 'Factura', tipo: 'texto' },
+      { id: 'proveedor', etiqueta: 'Proveedor', tipo: 'texto' },
+      { id: 'vencimiento', etiqueta: 'Vencimiento', tipo: 'fecha' },
+      { id: 'importe', etiqueta: 'Importe', tipo: 'dinero' },
+      { id: 'pagado', etiqueta: 'Pagado', tipo: 'dinero' },
+      { id: 'saldo', etiqueta: 'Saldo', tipo: 'dinero' },
+      { id: 'situacion', etiqueta: 'Situación', tipo: 'estado' },
+    ];
+  }
+
+  private filaCuentaAPagar(f: FacturaProveedor): Obj {
+    return { factura_id: f.id, numero: f.numero, proveedor: this.nombreProveedor(f.proveedor_id), vencimiento: f.vencimiento, importe: dinero(f.importe), pagado: dinero(f.pagado), saldo: dinero(saldoDeFacturaProveedor(f)), situacion: this.situacionPago(f) };
+  }
+
+  buscarProveedores(texto: unknown): SalidaTabla {
+    const q = normalizar(String(texto ?? '')).split(/\s+/).filter(Boolean);
+    if (q.length === 0) throw new ErrorErp('PARAMETRO_INVALIDO', 'Indicá qué proveedor buscar.');
+    const proveedores = this.datos.proveedores.filter((p) => {
+      const pajar = normalizar(p.nombre);
+      return q.every((x) => pajar.includes(x));
+    });
+    return {
+      titulo: `Proveedores que coinciden con «${String(texto)}»`,
+      columnas: [
+        { id: 'proveedor_id', etiqueta: 'Código', tipo: 'texto' },
+        { id: 'nombre', etiqueta: 'Proveedor', tipo: 'texto' },
+        { id: 'plazo_dias', etiqueta: 'Plazo (días)', tipo: 'numero' },
+        { id: 'saldo_pendiente', etiqueta: 'Saldo a pagar', tipo: 'dinero' },
+      ],
+      filas: proveedores.map((p) => ({ proveedor_id: p.id, nombre: p.nombre, plazo_dias: p.plazo_dias, saldo_pendiente: dinero(this.saldoProveedor(p.id)) })),
+      total_filas: proveedores.length,
+    };
+  }
+
+  listarCuentasAPagar(a: Obj): SalidaTabla {
+    const prov = a['proveedor_id'] === undefined ? undefined : this.proveedor(a['proveedor_id']);
+    const soloVencidas = a['solo_vencidas'] === true;
+    const dias = a['vence_en_dias'] === undefined ? undefined : entero(a['vence_en_dias'], 'vence_en_dias', 0, 365);
+    const limite = a['limite'] === undefined ? 50 : entero(a['limite'], 'limite', 1, 50);
+    if (soloVencidas && dias !== undefined) throw new ErrorErp('PARAMETRO_INVALIDO', 'Indicá solo_vencidas o vence_en_dias, no las dos.');
+    const hasta = dias === undefined ? undefined : sumarDias(HOY, dias);
+    const fs = this.cuentasAbiertas(prov?.id).filter((f) => (!soloVencidas || f.vencimiento < HOY) && (hasta === undefined || (f.vencimiento >= HOY && f.vencimiento <= hasta)));
+    const total = sumarCentavos(fs.map((f) => saldoDeFacturaProveedor(f)));
+    const filtro = soloVencidas ? ' vencidas' : hasta ? ` que vencen hasta el ${hasta}` : '';
+    return {
+      titulo: `Cuentas a pagar${filtro}${prov ? ` de ${prov.nombre}` : ''}: ${fs.length}, total ${fmt(total)}`,
+      columnas: this.columnasCuentasAPagar(),
+      filas: fs.slice(0, limite).map((f) => this.filaCuentaAPagar(f)),
+      total_filas: fs.length,
+    };
+  }
+
+  estadoCuentaProveedor(a: Obj): SalidaDetalle & { proveedor_id: string } {
+    const p = this.proveedor(a['proveedor_id']);
+    const abiertas = this.cuentasAbiertas(p.id);
+    const suma = (fs: FacturaProveedor[]): number => sumarCentavos(fs.map((f) => saldoDeFacturaProveedor(f)));
+    const fin = this.finDeSemana();
+    const vencido = abiertas.filter((f) => f.vencimiento < HOY);
+    const semana = abiertas.filter((f) => f.vencimiento >= HOY && f.vencimiento <= fin);
+    const despues = abiertas.filter((f) => f.vencimiento > fin);
+    const pendientesDebito = sumarCentavos(this.datos.pagosProveedor.filter((x) => x.proveedor_id === p.id && x.estado_bancario === 'pendiente_debito').map((x) => x.importe));
+    const campos = [
+      { etiqueta: 'Proveedor', valor: p.nombre },
+      { etiqueta: 'Plazo de pago', valor: `${p.plazo_dias} días` },
+      { etiqueta: 'Saldo a pagar', valor: fmt(suma(abiertas)) },
+      { etiqueta: 'Vencido', valor: fmt(suma(vencido)) },
+      { etiqueta: `Vence hasta el ${fin}`, valor: fmt(suma(semana)) },
+      { etiqueta: 'Vence después', valor: fmt(suma(despues)) },
+      { etiqueta: 'Pagos a la espera del débito bancario', valor: fmt(pendientesDebito) },
+      { etiqueta: 'Facturas con saldo', valor: String(abiertas.length) },
+    ];
+    for (const f of abiertas) {
+      const dup = this.duplicadasDe(f).length > 0 ? ', posible duplicada' : '';
+      campos.push({ etiqueta: `Factura ${this.etiquetaFacturaProveedor(f)} (${f.fecha})`, valor: `${fmt(saldoDeFacturaProveedor(f))}, ${f.vencimiento < HOY ? `vencida el ${f.vencimiento}` : `vence el ${f.vencimiento}`}${dup}` });
+    }
+    return { proveedor_id: p.id, titulo: `Estado de cuenta de ${p.nombre}`, campos };
+  }
+
+  vencimientosProximos(a: Obj): SalidaTabla {
+    const dias = a['dias'] === undefined ? 7 : entero(a['dias'], 'dias', 0, 90);
+    const prov = a['proveedor_id'] === undefined ? undefined : this.proveedor(a['proveedor_id']);
+    const hasta = sumarDias(HOY, dias);
+    const abiertas = this.cuentasAbiertas(prov?.id);
+    const fs = abiertas.filter((f) => f.vencimiento >= HOY && f.vencimiento <= hasta);
+    const vencido = sumarCentavos(abiertas.filter((f) => f.vencimiento < HOY).map((f) => saldoDeFacturaProveedor(f)));
+    return {
+      titulo: `Pagos que vencen del ${HOY} al ${hasta}${prov ? ` de ${prov.nombre}` : ''}: ${fs.length}, total ${fmt(sumarCentavos(fs.map((f) => saldoDeFacturaProveedor(f))))}. Ya vencido y sin pagar: ${fmt(vencido)}`,
+      columnas: this.columnasCuentasAPagar(),
+      filas: fs.map((f) => this.filaCuentaAPagar(f)),
+      total_filas: fs.length,
+    };
+  }
+
+  listarPagosProveedor(a: Obj): SalidaTabla {
+    const prov = a['proveedor_id'] === undefined ? undefined : this.proveedor(a['proveedor_id']);
+    const desde = a['desde'] === undefined ? undefined : fechaValida(a['desde'], 'desde');
+    const hasta = a['hasta'] === undefined ? undefined : fechaValida(a['hasta'], 'hasta');
+    if (desde && hasta && desde > hasta) throw new ErrorErp('PARAMETRO_INVALIDO', 'desde no puede ser posterior a hasta.');
+    const pagos = this.datos.pagosProveedor.filter((x) => (!prov || x.proveedor_id === prov.id) && (!desde || x.fecha >= desde) && (!hasta || x.fecha <= hasta)).sort((x, y) => y.fecha.localeCompare(x.fecha) || y.numero.localeCompare(x.numero));
+    return {
+      titulo: `Pagos a proveedores${prov ? ` de ${prov.nombre}` : ''}: ${pagos.length}, total ${fmt(sumarCentavos(pagos.map((x) => x.importe)))}`,
+      columnas: [
+        { id: 'numero', etiqueta: 'Orden de pago', tipo: 'texto' },
+        { id: 'fecha', etiqueta: 'Fecha', tipo: 'fecha' },
+        { id: 'proveedor', etiqueta: 'Proveedor', tipo: 'texto' },
+        { id: 'medio', etiqueta: 'Medio', tipo: 'texto' },
+        { id: 'importe', etiqueta: 'Importe', tipo: 'dinero' },
+        { id: 'estado_bancario', etiqueta: 'Estado', tipo: 'estado' },
+        { id: 'facturas', etiqueta: 'Facturas', tipo: 'numero' },
+      ],
+      filas: pagos.map((x) => ({ pago_id: x.id, numero: x.numero, fecha: x.fecha, proveedor: this.nombreProveedor(x.proveedor_id), medio: ETIQUETA_MEDIO_PAGO[x.medio], importe: dinero(x.importe), estado_bancario: x.estado_bancario, facturas: x.imputaciones.length })),
+      total_filas: pagos.length,
+    };
+  }
+
+  /** Reparte un pago entre las facturas dadas, empezando por la que vence primero. No cambia nada. */
+  private imputarPago(facturas: FacturaProveedor[], importe: number): { factura: FacturaProveedor; importe: number; saldoDespues: number }[] {
+    let resto = importe;
+    const out: { factura: FacturaProveedor; importe: number; saldoDespues: number }[] = [];
+    for (const f of facturas) {
+      if (resto <= 0) break;
+      const saldo = saldoDeFacturaProveedor(f);
+      const parte = Math.min(saldo, resto);
+      out.push({ factura: f, importe: parte, saldoDespues: saldo - parte });
+      resto -= parte;
+    }
+    return out;
+  }
+
   // ------------------------------------------------------------------ escrituras: preparar
 
   private exigirRol(tool: string, ctx: ContextoSesion): void {
@@ -1138,6 +1326,82 @@ export class ErpSintetico {
     });
   }
 
+
+  prepararPagoProveedor(a: Obj, ctx: ContextoSesion): Propuesta {
+    this.exigirRol('preparar_pago_proveedor', ctx);
+    const prov = this.proveedor(a['proveedor_id']);
+    const medio = a['medio'];
+    if (typeof medio !== 'string' || !(MEDIOS_PAGO as readonly string[]).includes(medio)) throw new ErrorErp('PARAMETRO_INVALIDO', 'medio debe ser efectivo o transferencia.', 'Preguntale a la persona el medio de pago.');
+    const refs = a['facturas'];
+    const alcance = a['alcance'];
+    if (refs !== undefined && alcance !== undefined) throw new ErrorErp('PARAMETRO_INVALIDO', 'Indicá facturas o alcance, no los dos.');
+    if (alcance !== undefined && alcance !== 'vencidas' && alcance !== 'vencen_esta_semana') throw new ErrorErp('PARAMETRO_INVALIDO', 'alcance debe ser vencidas o vencen_esta_semana.');
+    if (refs === undefined && alcance === undefined && a['importe'] === undefined) throw new ErrorErp('PARAMETRO_INVALIDO', 'Indicá el importe, las facturas o el alcance del pago.', 'Preguntale a la persona cuánto o qué facturas quiere pagar.');
+
+    const abiertas = this.cuentasAbiertas(prov.id);
+    let elegidas: FacturaProveedor[];
+    let alcanceTexto = 'todas sus facturas con saldo';
+    if (refs !== undefined) {
+      if (!Array.isArray(refs) || refs.length === 0 || refs.some((r) => typeof r !== 'string')) throw new ErrorErp('PARAMETRO_INVALIDO', 'facturas debe ser una lista de códigos o números de factura.');
+      const vistas = new Set<string>();
+      for (const r of refs as string[]) {
+        const f = this.facturaProveedorPor(r);
+        if (!f) throw new ErrorErp('NO_ENCONTRADO', `No existe la factura de proveedor ${r}.`, 'Listá las cuentas a pagar del proveedor y probá de nuevo.');
+        if (f.proveedor_id !== prov.id) throw new ErrorErp('PARAMETRO_INVALIDO', `La factura ${f.numero} es de ${this.nombreProveedor(f.proveedor_id)}, no de ${prov.nombre}.`);
+        if (saldoDeFacturaProveedor(f) <= 0) throw new ErrorErp('FACTURA_PAGADA', `La factura ${f.numero} ya está pagada.`, 'No hay nada que imputar a esa factura.');
+        vistas.add(f.id);
+      }
+      elegidas = abiertas.filter((f) => vistas.has(f.id));
+      alcanceTexto = 'las facturas indicadas';
+    } else if (alcance === 'vencidas') {
+      elegidas = abiertas.filter((f) => f.vencimiento < HOY);
+      alcanceTexto = 'sus facturas vencidas';
+    } else if (alcance === 'vencen_esta_semana') {
+      const fin = this.finDeSemana();
+      elegidas = abiertas.filter((f) => f.vencimiento >= HOY && f.vencimiento <= fin);
+      alcanceTexto = `sus facturas que vencen del ${HOY} al ${fin}`;
+    } else elegidas = abiertas;
+
+    const deuda = sumarCentavos(elegidas.map((f) => saldoDeFacturaProveedor(f)));
+    if (deuda <= 0) throw new ErrorErp('SIN_DEUDA', `${prov.nombre} no tiene ${alcance || refs ? alcanceTexto : 'facturas'} con saldo.`, 'No hay nada para pagar con ese criterio.');
+    const importe = a['importe'] === undefined ? deuda : parsearImporte(a['importe']);
+    // Un pago mayor a la deuda se rechaza: este ejemplo no lleva anticipos a proveedores.
+    if (importe > deuda) throw new ErrorErp('IMPORTE_EXCEDE_DEUDA', `El pago no puede superar lo que se le debe a ${prov.nombre} (${fmt(deuda)}) en ${alcanceTexto}.`, 'Pedí un importe menor o igual a la deuda.');
+
+    const plan = this.imputarPago(elegidas, importe);
+    const stepPago: StepUp = importe >= this.umbralMotivoPagoProveedor ? 'supervisor_y_motivo' : importe >= this.umbralPagoProveedor ? 'supervisor' : 'none';
+    // En efectivo el pago también es un egreso de caja: rige el más estricto entre el umbral de pagos y el de caja.
+    const stepCaja: StepUp = medio === 'efectivo' ? (importe >= this.umbralMotivoCaja ? 'supervisor_y_motivo' : importe >= this.umbralSupervisorCaja ? 'supervisor' : 'none') : 'none';
+    const stepUp = mayorStepUp(stepPago, stepCaja);
+    const p = this.guardar({ tipo: 'pago_proveedor', proveedor_id: prov.id, medio: medio as MedioPago, importe, factura_ids: elegidas.map((f) => f.id) }, dinero(importe), stepUp, ctx);
+    this.aud(ctx, 'preparar_pago_proveedor');
+    const saldadas = plan.filter((x) => x.saldoDespues === 0).length;
+    const advertencias: string[] = [];
+    if (medio === 'efectivo') advertencias.push('Al confirmar se registra también el egreso en la caja de hoy.');
+    else advertencias.push('Al confirmar queda registrado como pendiente de débito bancario: el pago no se considera acreditado hasta que tesorería lo concilie.');
+    if (stepPago !== 'none') advertencias.push(this.advertenciaStepUpPago(stepPago));
+    if (stepCaja !== 'none') advertencias.push(this.advertenciaStepUpCaja(stepCaja));
+    for (const x of plan) if (this.duplicadasDe(x.factura).length > 0) advertencias.push(`La factura ${x.factura.numero} parece estar cargada dos veces (mismo número e importe): revisala antes de pagarla.`);
+    return this.propuesta(p, {
+      titulo: `Pago a ${prov.nombre}`,
+      resumen: [
+        { etiqueta: 'Proveedor', valor: prov.nombre },
+        { etiqueta: 'Medio', valor: ETIQUETA_MEDIO_PAGO[medio as MedioPago] },
+        { etiqueta: 'Deuda con el proveedor antes del pago', valor: fmt(this.saldoProveedor(prov.id)) },
+        { etiqueta: 'Deuda con el proveedor después del pago', valor: fmt(this.saldoProveedor(prov.id) - importe) },
+        { etiqueta: 'Facturas que quedan pagadas', valor: `${saldadas} de ${plan.length}` },
+      ],
+      lineas: plan.map((x) => ({ descripcion: `Factura ${this.etiquetaFacturaProveedor(x.factura)} (vence el ${x.factura.vencimiento}), queda ${x.saldoDespues === 0 ? 'pagada' : `con saldo ${fmt(x.saldoDespues)}`}`, importe: dinero(x.importe) })),
+      advertencias,
+    });
+  }
+
+  private advertenciaStepUpPago(stepUp: Exclude<StepUp, 'none'>): string {
+    return stepUp === 'supervisor_y_motivo'
+      ? `Los pagos a proveedores de ${montoUmbral(this.umbralMotivoPagoProveedor)} o más necesitan la confirmación de un supervisor y el motivo.`
+      : `Los pagos a proveedores de ${montoUmbral(this.umbralPagoProveedor)} o más necesitan la confirmación de un supervisor.`;
+  }
+
   /** Una factura anulada o cobrada por completo no se puede acreditar. */
   private exigirAcreditable(f: Factura): void {
     if (f.estado === 'anulada') throw new ErrorErp('FACTURA_NO_ACREDITABLE', `La factura ${this.etiquetaFactura(f)} está anulada.`, 'No hace falta otra nota de crédito sobre una factura anulada.');
@@ -1146,7 +1410,7 @@ export class ErpSintetico {
 
   // ------------------------------------------------------------------ escrituras: confirmar
 
-  async confirmar(tool: 'ajuste_stock' | 'orden_compra' | 'movimiento_caja' | 'nota_credito' | 'cobranza', a: Obj, ctx: ContextoSesion): Promise<ConfirmarSalida> {
+  async confirmar(tool: 'ajuste_stock' | 'orden_compra' | 'movimiento_caja' | 'nota_credito' | 'cobranza' | 'pago_proveedor', a: Obj, ctx: ContextoSesion): Promise<ConfirmarSalida> {
     this.exigirRol(`preparar_${tool}`, ctx);
     const p = typeof a['proposal_id'] === 'string' ? this.propuestas.get(a['proposal_id']) : undefined;
     if (!p || p.efecto.tipo !== tool) throw new ErrorErp('PROPUESTA_NO_ENCONTRADA', 'No existe esa propuesta.');
@@ -1256,6 +1520,49 @@ export class ErpSintetico {
         ...(p.total ? { total: p.total } : {}),
       };
       mensaje = `Cobranza ${cobro.numero} registrada a ${cli.nombre}.`;
+    } else if (e.tipo === 'pago_proveedor') {
+      const prov = this.proveedor(e.proveedor_id);
+      // Entre preparar y confirmar el saldo de esas facturas pudo cambiar (otro pago): se reparte de nuevo contra el estado real.
+      const ids = new Set(e.factura_ids);
+      const vigentes = this.cuentasAbiertas(prov.id).filter((f) => ids.has(f.id));
+      const deuda = sumarCentavos(vigentes.map((f) => saldoDeFacturaProveedor(f)));
+      if (e.importe > deuda) throw new ErrorErp('IMPORTE_EXCEDE_DEUDA', `La deuda con ${prov.nombre} cambió y ya no alcanza para este pago (${fmt(deuda)}).`, 'Pedí la operación de nuevo.');
+      const plan = this.imputarPago(vigentes, e.importe);
+      for (const x of plan) {
+        x.factura.pagado += x.importe;
+        x.factura.estado = estadoDeFacturaProveedor(x.factura);
+      }
+      const n = this.datos.pagosProveedor.length + 1;
+      const pago: PagoProveedor = {
+        id: `pag_${String(n).padStart(4, '0')}`,
+        numero: `OP-${String(n).padStart(4, '0')}`,
+        proveedor_id: prov.id,
+        fecha: HOY,
+        medio: e.medio,
+        importe: e.importe,
+        estado_bancario: e.medio === 'efectivo' ? 'pagado' : 'pendiente_debito',
+        imputaciones: plan.map((x) => ({ factura_id: x.factura.id, importe: x.importe })),
+      };
+      this.datos.pagosProveedor.push(pago);
+      let movimientoId: string | undefined;
+      if (e.medio === 'efectivo') {
+        const mov: MovimientoCaja = { id: `mov_${String(this.datos.movimientos.length + 1).padStart(4, '0')}`, fecha: HOY, tipo: 'egreso', concepto: `Pago proveedor ${prov.nombre}`.slice(0, 80), importe: e.importe };
+        this.datos.movimientos.push(mov);
+        movimientoId = mov.id;
+        this.emitir('movimiento_caja_registrado', { movimiento_id: mov.id, tipo: mov.tipo });
+      }
+      this.emitir('pago_proveedor_registrado', { pago_id: pago.id, proveedor_id: prov.id, medio: pago.medio, estado_bancario: pago.estado_bancario });
+      resultado = {
+        pago_id: pago.id,
+        numero: pago.numero,
+        proveedor_id: prov.id,
+        estado_bancario: pago.estado_bancario,
+        saldo_proveedor: dinero(this.saldoProveedor(prov.id)),
+        facturas: plan.map((x) => ({ factura_id: x.factura.id, estado: x.factura.estado })),
+        ...(movimientoId ? { movimiento_caja_id: movimientoId } : {}),
+        ...(p.total ? { total: p.total } : {}),
+      };
+      mensaje = `Pago ${pago.numero} registrado a ${prov.nombre}.${pago.estado_bancario === 'pendiente_debito' ? ' Queda pendiente de débito bancario.' : ''}`;
     } else {
       const mov: MovimientoCaja = { id: `mov_${String(this.datos.movimientos.length + 1).padStart(4, '0')}`, fecha: HOY, ...e.mov };
       this.datos.movimientos.push(mov);
@@ -1269,6 +1576,13 @@ export class ErpSintetico {
     this.aud(ctx, `confirmar_${tool}`, autorizo, motivo);
     return salida;
   }
+}
+
+/** El nivel de step-up que cumple los dos: pide supervisor si alguno lo pide y motivo si alguno lo pide. */
+function mayorStepUp(a: StepUp, b: StepUp): StepUp {
+  const supervisor = pideSupervisor(a) || pideSupervisor(b);
+  const motivo = pideMotivo(a) || pideMotivo(b);
+  return supervisor && motivo ? 'supervisor_y_motivo' : supervisor ? 'supervisor' : motivo ? 'motivo' : 'none';
 }
 
 function totalOrden(o: OrdenCompra): number {
