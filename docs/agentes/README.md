@@ -20,7 +20,7 @@ Ningún agente escribe por su cuenta. Las tools `preparar_*` solo arman una prop
 
 ## Frases de ejemplo probadas
 
-Cada frase que figura en las páginas de área existe en [`evals/frases.json`](../../evals/frases.json), así que `npm run eval` verifica que el router la mande al área indicada, que el agente use las tools esperadas y que termine en el componente que se describe. Una prueba (`examples/erp-sintetico/tests/agentes.test.ts`) falla si una página cita una frase que no está en los evals. El formato es una línea que empieza con `> ` dentro de la sección "Qué le podés pedir".
+Cada frase que figura en las páginas de área existe en [`evals/frases.json`](../../evals/frases.json), así que `npm run eval` verifica que el router la mande al área indicada, que el agente use las tools esperadas y que termine en el componente que se describe. Una prueba (`examples/erp-sintetico/tests/agentes-docs.test.ts`) falla si una página cita una frase que no está en los evals. El formato es una línea que empieza con `> ` dentro de la sección "Qué le podés pedir".
 
 ## Cómo sumar un área
 
