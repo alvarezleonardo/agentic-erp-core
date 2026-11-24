@@ -20,8 +20,11 @@ Cada área vive en su carpeta, en [`examples/erp-sintetico/src/agentes/`](../../
 | Pagos a proveedores | Cuentas a pagar, vencimientos, agenda de pagos y registro de pagos | Sí: pagos a proveedores | [playbook](../../examples/erp-sintetico/src/agentes/pagos/playbook.md) | [pagos](pagos.md) |
 | Tesorería y bancos | Cuentas bancarias, movimientos, conciliación de depósitos de caja, posición de tesorería | Sí: transferencias entre cuentas propias | [playbook](../../examples/erp-sintetico/src/agentes/tesoreria/playbook.md) | [tesorería](tesoreria.md) |
 | Precios y listas | Listas de precios, margen de cada artículo, historial de cambios y cambios de precio | Sí: cambios de precio | [playbook](../../examples/erp-sintetico/src/agentes/precios/playbook.md) | [precios](precios.md) |
+| Gestión del día | Cierre del día, resumen del período y alertas que juntan lo que detectan las demás áreas | No | [playbook](../../examples/erp-sintetico/src/agentes/gestion/playbook.md) | [gestión](gestion.md) |
 
 Ningún agente escribe por su cuenta. Las tools `preparar_*` solo arman una propuesta; la confirmación (`confirmar_*`) la hace la persona desde la pantalla, y el agente no tiene acceso a ninguna tool de confirmación.
+
+Mapa de las diez áreas: ventas y gestión del día solo leen (la segunda mira el negocio entero de una vez y no tiene ningún `preparar_*`). Las otras ocho escriben, siempre con el par `preparar_*` / `confirmar_*`: stock, caja, facturación, cobranzas y tesorería las prepara también un operador; compras, pagos y precios solo supervisor y gerente. Según los umbrales de cada página, piden además la confirmación de un supervisor los egresos grandes de caja (con motivo los más grandes), las notas de crédito de 1.000,00 o más, los cobros de 5.000,00 o más, los pagos a proveedores de 1.000,00 o más (con motivo desde 5.000,00), las transferencias internas de 5.000,00 o más y los cambios de precio de más de 15 %, de más de 5 artículos o que dejan un precio bajo el costo. Stock y compras no la piden.
 
 ## Frases de ejemplo probadas
 
