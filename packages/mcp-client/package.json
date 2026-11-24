@@ -1,6 +1,6 @@
 {
   "name": "@agentic-erp/mcp-client",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "type": "module",
   "description": "Cliente MCP compuesto: une varios servidores MCP detrás de un solo puerto ToolClient.",
   "license": "MIT",
@@ -34,7 +34,7 @@
     }
   },
   "dependencies": {
-    "@agentic-erp/mcp-contract": "0.1.1",
+    "@agentic-erp/mcp-contract": "0.1.2",
     "@modelcontextprotocol/sdk": "1.32.2"
   }
 }

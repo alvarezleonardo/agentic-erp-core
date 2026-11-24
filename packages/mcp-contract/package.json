@@ -1,6 +1,6 @@
 {
   "name": "@agentic-erp/mcp-contract",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "type": "module",
   "description": "El contrato que un ERP expone por MCP: lecturas, preparar/confirmar con idempotencia, eventos con cursor y métricas semánticas.",
   "license": "MIT",
