@@ -2,6 +2,16 @@
 
 Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y versionado semántico.
 
+## [0.1.2] - 2026-11-24
+
+### Agregado
+
+- `docs/ejemplos/auditoria.md`: tres trazas completas de una corrida real (camino feliz, autorización inválida y reintento con la misma clave de idempotencia), que se regeneran con `npm run ejemplo:auditoria`.
+
+### Cambiado
+
+- Los textos, la salida de la demo y la demo grabada nombran a quien confirma (por ejemplo, `supervisor1`) y hablan de las credenciales de la confirmación. El contrato técnico no cambia.
+
 ## [0.1.1] - 2026-11-16
 
 ### Corregido

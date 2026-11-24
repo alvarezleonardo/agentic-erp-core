@@ -1,6 +1,6 @@
 {
   "name": "agentic-erp-core",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "private": true,
   "description": "Framework para agregar una capa agéntica a un ERP: el agente propone y la persona decide.",
   "license": "MIT",
