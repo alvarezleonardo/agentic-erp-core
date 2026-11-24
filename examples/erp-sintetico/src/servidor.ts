@@ -266,6 +266,51 @@ export const TOOLS: DefTool[] = [
     manejar: (a, c, erp) => ({ ...erp.prepararPagoProveedor(a, c) }),
   },
   { nombre: 'confirmar_pago_proveedor', descripcion: 'Confirma un pago a proveedor preparado. Lo llama el orquestador tras el toque de la persona.', esquema: confirmarEsquema(), manejar: async (a, c, erp) => ({ ...(await erp.confirmar('pago_proveedor', a, c)) }) },
+  // ---- tesorería y bancos
+  {
+    nombre: 'listar_cuentas_bancarias',
+    descripcion: 'Cuentas bancarias propias con su moneda y su saldo actual. Devuelve los códigos (cuenta_id) que piden las demás tools de tesorería. Las cuentas en monedas distintas no se suman.',
+    esquema: entrada({}),
+    manejar: (_a, _c, erp) => ({ ...erp.listarCuentasBancarias() }),
+  },
+  {
+    nombre: 'listar_movimientos_bancarios',
+    descripcion: 'Movimientos del extracto bancario, filtrados por cuenta, período y tipo, del más reciente al más viejo. Cada importe va con signo (crédito positivo, débito negativo) y en la moneda de su cuenta.',
+    esquema: entrada({
+      cuenta_id: { type: 'string' },
+      desde: FECHA,
+      hasta: FECHA,
+      tipo: { enum: ['deposito_caja', 'acreditacion_cliente', 'debito_proveedor', 'comision', 'impuesto', 'transferencia_interna'] },
+      limite: { type: 'integer', minimum: 1, maximum: 200 },
+    }),
+    manejar: (a, _c, erp) => ({ ...erp.listarMovimientosBancarios(a) }),
+  },
+  {
+    nombre: 'conciliar_depositos',
+    descripcion: 'Concilia los egresos «Depósito bancario» de la caja de un período contra los créditos del banco. Devuelve los depósitos con diferencia (el banco acreditó otro importe) y los pendientes (todavía sin acreditar), con totales en el título; con incluir_conciliados también lista los que coinciden.',
+    esquema: entrada({ desde: FECHA, hasta: FECHA, incluir_conciliados: { type: 'boolean' } }, ['desde', 'hasta']),
+    manejar: (a, _c, erp) => ({ ...erp.conciliarDepositos(a) }),
+  },
+  {
+    nombre: 'posicion_tesoreria',
+    descripcion: 'Posición de tesorería de hoy: caja, saldo de los bancos por moneda, pagos a proveedores pendientes de débito, lo que vence a proveedores en los próximos 7 días y lo disponible antes y después de esos vencimientos. Todo calculado por el servidor.',
+    esquema: entrada({}),
+    manejar: (_a, _c, erp) => ({ ...erp.posicionTesoreria() }),
+  },
+  {
+    nombre: 'preparar_transferencia_interna',
+    descripcion: 'Prepara una transferencia entre dos cuentas bancarias propias (cuenta_origen_id y cuenta_destino_id de listar_cuentas_bancarias) con su importe. El servidor rechaza cuentas de monedas distintas, la misma cuenta de los dos lados y un importe mayor al saldo de origen, y calcula los saldos que quedan. Las transferencias grandes necesitan la confirmación de un supervisor. No se registra hasta que la persona confirma.',
+    esquema: entrada(
+      {
+        cuenta_origen_id: { type: 'string' },
+        cuenta_destino_id: { type: 'string' },
+        importe: { type: ['string', 'number'], description: 'Importe tal como lo dijo la persona, sin símbolo de moneda.' },
+      },
+      ['cuenta_origen_id', 'cuenta_destino_id', 'importe'],
+    ),
+    manejar: (a, c, erp) => ({ ...erp.prepararTransferenciaInterna(a, c) }),
+  },
+  { nombre: 'confirmar_transferencia_interna', descripcion: 'Confirma una transferencia interna preparada. Lo llama el orquestador tras el toque de la persona.', esquema: confirmarEsquema(), manejar: async (a, c, erp) => ({ ...(await erp.confirmar('transferencia_interna', a, c)) }) },
 ];
 
 export const toolsMcp = (): ToolMcp[] => TOOLS.map((t) => ({ nombre: t.nombre, descripcion: t.descripcion, esquema: t.esquema }));

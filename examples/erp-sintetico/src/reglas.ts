@@ -10,6 +10,7 @@ export const DOMINIOS: DominioDef[] = [
   { nombre: 'facturacion', descripcion: 'Clientes, facturas de venta, saldo de cada factura, total facturado y notas de crédito' },
   { nombre: 'cobranzas', descripcion: 'Cuánto debe cada cliente (estado de cuenta, deudores, antigüedad de la deuda, límite de crédito) y registro de cobros' },
   { nombre: 'pagos', descripcion: 'Cuánto se le debe a cada proveedor (cuentas a pagar, vencimientos, agenda de pagos) y registro de pagos a proveedores' },
+  { nombre: 'tesoreria', descripcion: 'Cuentas bancarias y sus movimientos, conciliación de los depósitos de caja con el banco, posición de tesorería y transferencias entre cuentas propias' },
 ];
 
 /**
@@ -30,13 +31,16 @@ export const REGLAS: ReglaRouter[] = [
   // Pagos: «pagale/pagá/pagar» y los vencimientos de proveedores. «pagá las facturas vencidas» también dispara facturación por «factur\w*»: por eso la regla de pagar es exclusiva.
   { dominio: 'pagos', exclusiva: true, patron: /\bpagal[eo]s?\b|\bpaga\b|\bpagar\b|\bpagame\b/ },
   { dominio: 'pagos', patron: /\bpagos?\b|\bcuentas? a pagar\b|\bdebemos\b|\bvencimientos?\b/ },
+  // Tesorería: «concili\w*» es exclusiva porque «conciliá los depósitos de caja» también dispara caja. Los bancos se nombran por su nombre propio.
+  { dominio: 'tesoreria', exclusiva: true, patron: /\bconcili\w*/ },
+  { dominio: 'tesoreria', patron: /\bbancos?\b|\bbancari\w*|\btesoreria\b|\bnacion\b|\bgalicia\b|\bsantander\b|\btransferi\w*|\btransferencias? internas?\b/ },
 ];
 
 export function crearRouter(llm?: LlmProvider): Router {
   const opciones: OpcionesRouter = {
     dominios: DOMINIOS,
     reglas: REGLAS,
-    descripcionDelNegocio: 'El negocio vende artículos de oficina y tecnología en tienda y online; el ERP lleva ventas, stock, compras, caja, facturación a clientes, cobranzas y pagos a proveedores.',
+    descripcionDelNegocio: 'El negocio vende artículos de oficina y tecnología en tienda y online; el ERP lleva ventas, stock, compras, caja, facturación a clientes, cobranzas, pagos a proveedores y tesorería (cuentas bancarias).',
     ...(llm ? { llm } : {}),
   };
   return new Router(opciones);

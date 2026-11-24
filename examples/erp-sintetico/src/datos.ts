@@ -175,7 +175,7 @@ export interface FacturaProveedor {
 
 export type MedioPago = 'efectivo' | 'transferencia';
 
-/** `pagado`: salió de la caja. `pendiente_debito`: transferencia ordenada, a la espera del débito bancario (lo cierra el área de tesorería). */
+/** `pagado`: salió de la caja. `pendiente_debito`: transferencia ordenada, a la espera del débito bancario (tesorería lo informa en la posición; este ejemplo no registra el débito). */
 export type EstadoBancario = 'pagado' | 'pendiente_debito';
 
 /** Parte de un pago aplicada a una factura de proveedor. */
@@ -207,6 +207,47 @@ export function estadoDeFacturaProveedor(f: Pick<FacturaProveedor, 'importe' | '
   return f.pagado > 0 ? 'parcialmente_pagada' : 'pendiente';
 }
 
+export type MonedaCuenta = 'USD' | 'ARS';
+
+/** Cuenta bancaria propia. El saldo no se guarda: es `saldo_inicial` más los movimientos (ver `saldoDeCuenta`). */
+export interface CuentaBancaria {
+  id: string;
+  nombre: string;
+  moneda: MonedaCuenta;
+  /** Centavos de la moneda de la cuenta, al 01/01/2026. */
+  saldo_inicial: number;
+}
+
+export type TipoMovimientoBancario = 'deposito_caja' | 'acreditacion_cliente' | 'debito_proveedor' | 'comision' | 'impuesto' | 'transferencia_interna';
+
+/** Movimiento del extracto bancario. El importe es siempre positivo; el sentido dice si suma (`credito`) o resta (`debito`). */
+export interface MovimientoBancario {
+  id: string;
+  cuenta_id: string;
+  fecha: string;
+  sentido: 'credito' | 'debito';
+  tipo: TipoMovimientoBancario;
+  concepto: string;
+  /** Centavos de la moneda de la cuenta. */
+  importe: number;
+}
+
+/** Transferencia entre dos cuentas propias de la misma moneda. Deja dos movimientos bancarios: un débito y un crédito. */
+export interface TransferenciaInterna {
+  id: string;
+  /** Número, por ejemplo TI-0001. */
+  numero: string;
+  fecha: string;
+  origen_id: string;
+  destino_id: string;
+  /** Centavos de la moneda de las dos cuentas. */
+  importe: number;
+}
+
+/** Saldo de una cuenta, en centavos de su moneda. */
+export const saldoDeCuenta = (cuenta: CuentaBancaria, movimientos: readonly MovimientoBancario[]): number =>
+  cuenta.saldo_inicial + movimientos.filter((m) => m.cuenta_id === cuenta.id).reduce((s, m) => s + (m.sentido === 'credito' ? m.importe : -m.importe), 0);
+
 export interface DatosErp {
   proveedores: Proveedor[];
   articulos: Articulo[];
@@ -223,6 +264,12 @@ export interface DatosErp {
   facturasProveedor: FacturaProveedor[];
   /** Pagos registrados con el ERP. Arranca vacío: los pagos anteriores están en `FacturaProveedor.pagado`. */
   pagosProveedor: PagoProveedor[];
+  /** Cuentas bancarias propias (tesorería). */
+  cuentasBancarias: CuentaBancaria[];
+  /** Extracto de las cuentas desde el 01/01/2026 hasta hoy (ver `generarTesoreria`). */
+  movimientosBancarios: MovimientoBancario[];
+  /** Transferencias internas registradas con el ERP. Arranca vacío. */
+  transferenciasInternas: TransferenciaInterna[];
 }
 
 /** Generador pseudoaleatorio determinista (mulberry32). */
@@ -320,7 +367,22 @@ export function generarDatos(): DatosErp {
     apertura = contado;
   }
 
-  return { proveedores: PROVEEDORES.map((p) => ({ ...p })), articulos, ventas, ordenes, movimientos, arqueos, ...generarFacturacion(), cobranzas: [], facturasProveedor: generarFacturasProveedor(ordenes), pagosProveedor: [] };
+  const facturasProveedor = generarFacturasProveedor(ordenes);
+  const facturacion = generarFacturacion();
+  return {
+    proveedores: PROVEEDORES.map((p) => ({ ...p })),
+    articulos,
+    ventas,
+    ordenes,
+    movimientos,
+    arqueos,
+    ...facturacion,
+    cobranzas: [],
+    facturasProveedor,
+    pagosProveedor: [],
+    ...generarTesoreria(movimientos, facturasProveedor, facturacion.clientes),
+    transferenciasInternas: [],
+  };
 }
 
 // ---------------------------------------------------------------------------------------------------------- facturación
@@ -452,4 +514,103 @@ function generarFacturasProveedor(ordenes: OrdenCompra[]): FacturaProveedor[] {
     { id: 'fpr_0015', numero: '0011-00077210', proveedor_id: 'prv_02', fecha: '2026-03-29', vencimiento: '2026-04-28', importe: 215_000, pagado: 0 },
   ];
   return bases.map((b) => ({ ...b, estado: estadoDeFacturaProveedor(b) }));
+}
+
+
+// ------------------------------------------------------------------------------------------------------------- tesorería
+
+export const CUENTA_NACION = 'cta_01';
+export const CUENTA_GALICIA = 'cta_02';
+export const CUENTA_SANTANDER = 'cta_03';
+
+/** Días que tarda como máximo el banco en acreditar un depósito: la ventana en que `conciliar_depositos` busca el crédito. */
+export const VENTANA_ACREDITACION_DIAS = 3;
+/** Depósito de caja que el banco acreditó por menos (la diferencia de abajo) y depósito que no acreditó. */
+export const DEPOSITO_CON_DIFERENCIA = '2026-03-12';
+export const DIFERENCIA_DEPOSITO_CENTAVOS = 12_000;
+export const DEPOSITO_SIN_ACREDITAR = '2026-03-26';
+
+/**
+ * Cuentas bancarias. Importes en centavos de la moneda de cada cuenta. Casos sembrados a propósito:
+ * - Las dos primeras son en USD, así que una transferencia interna entre ellas es válida; la tercera es en ARS y una
+ *   transferencia entre esa y cualquiera de las otras se rechaza por monedas distintas.
+ * - Los depósitos de caja van a la cuenta del Nación.
+ */
+const CUENTAS: CuentaBancaria[] = [
+  { id: CUENTA_NACION, nombre: 'Banco Nación CC 1234', moneda: 'USD', saldo_inicial: 2_000_000 },
+  { id: CUENTA_GALICIA, nombre: 'Banco Galicia CA USD 5678', moneda: 'USD', saldo_inicial: 1_500_000 },
+  { id: CUENTA_SANTANDER, nombre: 'Banco Santander CC ARS 9012', moneda: 'ARS', saldo_inicial: 900_000_000 },
+];
+
+const COMISION_MENSUAL: Record<string, number> = { [CUENTA_NACION]: 1_800, [CUENTA_GALICIA]: 900, [CUENTA_SANTANDER]: 250_000 };
+/** Impuesto sobre los débitos del mes (simplificado: un solo porcentaje, en milésimas de punto, sobre los débitos de la cuenta). */
+const IMPUESTO_DEBITOS_MILESIMAS = 6;
+
+const finDeMes = (fecha: string): string => {
+  const d = new Date(`${fecha.slice(0, 7)}-01T00:00:00Z`);
+  d.setUTCMonth(d.getUTCMonth() + 1);
+  d.setUTCDate(0);
+  return d.toISOString().slice(0, 10);
+};
+
+/**
+ * Genera las cuentas bancarias y su extracto. Usa su propio generador (semilla distinta): no altera ni un número de los
+ * datos anteriores. Cada movimiento nace de un dato que ya existe en el ERP:
+ * - Un crédito «Depósito en efectivo» por cada egreso «Depósito bancario» de caja, en el Nación, por el mismo importe, 0 a 2 días
+ *   después del egreso (nunca después de hoy). Dos excepciones sembradas: el depósito del 12/03 se acreditó por 120.00 menos (una
+ *   diferencia) y el del 26/03 no se acreditó (pendiente). Con ellas, `conciliar_depositos` encuentra exactamente un caso de cada uno.
+ * - Un débito por cada pago a proveedor que las facturas ya traen hecho (`FacturaProveedor.pagado`), a la fecha de vencimiento
+ *   (o a hoy si todavía no venció), desde el Nación.
+ * - Algunas acreditaciones de transferencias de clientes en cuenta corriente (nunca del moroso), sobre todo al Nación y algunas al Galicia.
+ * - Una comisión de mantenimiento por cuenta y mes, y un impuesto sobre los débitos del mes en las dos cuentas en USD, ambos el último día del mes.
+ * Los cobros y pagos que se registren después con el ERP no generan movimientos bancarios: los cobros por transferencia o cheque
+ * y las transferencias a proveedores quedan fuera del extracto (los pagos, como `pendiente_debito`).
+ */
+function generarTesoreria(movimientosCaja: MovimientoCaja[], facturasProveedor: FacturaProveedor[], clientes: Cliente[]): Pick<DatosErp, 'cuentasBancarias' | 'movimientosBancarios'> {
+  const rng = mulberry32(SEMILLA ^ 0xba2c);
+  const crudos: Omit<MovimientoBancario, 'id'>[] = [];
+
+  for (const m of movimientosCaja) {
+    if (m.tipo !== 'egreso' || m.concepto !== 'Depósito bancario') continue;
+    const demora = Math.floor(rng() * 3); // 0, 1 o 2 días; se consume siempre para no desordenar el resto
+    if (m.fecha === DEPOSITO_SIN_ACREDITAR) continue;
+    const acreditado = sumarDias(m.fecha, demora);
+    const importe = m.fecha === DEPOSITO_CON_DIFERENCIA ? m.importe - DIFERENCIA_DEPOSITO_CENTAVOS : m.importe;
+    crudos.push({ cuenta_id: CUENTA_NACION, fecha: acreditado > HOY ? HOY : acreditado, sentido: 'credito', tipo: 'deposito_caja', concepto: 'Depósito en efectivo', importe });
+  }
+
+  const pagadoras = clientes.filter((c) => c.condicion_pago === 'cuenta_corriente' && c.id !== CLIENTE_MOROSO);
+  for (const fecha of rango(INICIO_DATOS, HOY)) {
+    const llega = rng();
+    const quien = rng();
+    const monto = rng();
+    const cuenta = rng();
+    if (llega >= 0.22) continue;
+    const cliente = pagadoras[Math.floor(quien * pagadoras.length)] ?? pagadoras[0];
+    if (!cliente) continue;
+    crudos.push({ cuenta_id: cuenta < 0.7 ? CUENTA_NACION : CUENTA_GALICIA, fecha, sentido: 'credito', tipo: 'acreditacion_cliente', concepto: `Transferencia ${cliente.nombre}`, importe: Math.round((15_000 + monto * 135_000) / 5) * 5 });
+  }
+
+  for (const f of facturasProveedor) {
+    if (f.pagado <= 0) continue;
+    const proveedor = PROVEEDORES.find((p) => p.id === f.proveedor_id);
+    crudos.push({ cuenta_id: CUENTA_NACION, fecha: f.vencimiento > HOY ? HOY : f.vencimiento, sentido: 'debito', tipo: 'debito_proveedor', concepto: `Transferencia a ${proveedor?.nombre ?? f.proveedor_id}, factura ${f.numero}`, importe: f.pagado });
+  }
+
+  for (const cuenta of CUENTAS) {
+    for (const mes of ['2026-01', '2026-02', '2026-03']) {
+      const fecha = finDeMes(`${mes}-01`);
+      if (fecha > HOY) continue;
+      crudos.push({ cuenta_id: cuenta.id, fecha, sentido: 'debito', tipo: 'comision', concepto: 'Comisión de mantenimiento de cuenta', importe: COMISION_MENSUAL[cuenta.id] ?? 0 });
+      if (cuenta.moneda !== 'USD') continue;
+      const debitos = crudos.filter((x) => x.cuenta_id === cuenta.id && x.sentido === 'debito' && x.tipo !== 'impuesto' && x.fecha.startsWith(mes)).reduce((s, x) => s + x.importe, 0);
+      crudos.push({ cuenta_id: cuenta.id, fecha, sentido: 'debito', tipo: 'impuesto', concepto: 'Impuesto sobre débitos bancarios', importe: Math.round((debitos * IMPUESTO_DEBITOS_MILESIMAS) / 1000) });
+    }
+  }
+
+  const ordenados = crudos.sort((a, b) => a.fecha.localeCompare(b.fecha) || a.cuenta_id.localeCompare(b.cuenta_id) || a.sentido.localeCompare(b.sentido) || a.concepto.localeCompare(b.concepto));
+  return {
+    cuentasBancarias: CUENTAS.map((c) => ({ ...c })),
+    movimientosBancarios: ordenados.map((m, i) => ({ id: `mba_${String(i + 1).padStart(4, '0')}`, ...m })),
+  };
 }

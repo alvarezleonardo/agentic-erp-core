@@ -18,6 +18,7 @@ Cada área vive en su carpeta, en [`examples/erp-sintetico/src/agentes/`](../../
 | Facturación | Clientes, facturas de venta, total facturado y notas de crédito | Sí: notas de crédito | [playbook](../../examples/erp-sintetico/src/agentes/facturacion/playbook.md) | [facturación](facturacion.md) |
 | Clientes y cobranzas | Estado de cuenta, deudores por antigüedad y registro de cobros | Sí: cobranzas | [playbook](../../examples/erp-sintetico/src/agentes/cobranzas/playbook.md) | [cobranzas](cobranzas.md) |
 | Pagos a proveedores | Cuentas a pagar, vencimientos, agenda de pagos y registro de pagos | Sí: pagos a proveedores | [playbook](../../examples/erp-sintetico/src/agentes/pagos/playbook.md) | [pagos](pagos.md) |
+| Tesorería y bancos | Cuentas bancarias, movimientos, conciliación de depósitos de caja, posición de tesorería | Sí: transferencias entre cuentas propias | [playbook](../../examples/erp-sintetico/src/agentes/tesoreria/playbook.md) | [tesorería](tesoreria.md) |
 
 Ningún agente escribe por su cuenta. Las tools `preparar_*` solo arman una propuesta; la confirmación (`confirmar_*`) la hace la persona desde la pantalla, y el agente no tiene acceso a ninguna tool de confirmación.
 
