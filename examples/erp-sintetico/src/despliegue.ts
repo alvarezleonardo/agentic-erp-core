@@ -2,7 +2,7 @@ import { Herramientas, Orquestador, Trace, type OpcionesOrquestador } from '@age
 import type { LlmProvider } from '@agentic-erp/llm';
 import { ClienteMcp } from '@agentic-erp/mcp-client';
 import type { ContextoSesion } from '@agentic-erp/mcp-contract';
-import { REGISTRO_AGENTES } from './agentes.js';
+import { REGISTRO_AGENTES } from './agentes/index.js';
 import { HOY } from './datos.js';
 import type { ErpSintetico, OpcionesErp } from './erp.js';
 import { permisosDelEjemplo } from './permisos.js';
