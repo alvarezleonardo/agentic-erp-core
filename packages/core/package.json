@@ -1,6 +1,6 @@
 {
   "name": "@agentic-erp/core",
-  "version": "0.1.2",
+  "version": "0.2.0",
   "type": "module",
   "description": "Núcleo: router híbrido, AgentRunner, ProposalStore, Compositor, ContractValidator, memoria, permisos y trazas.",
   "license": "MIT",
@@ -36,8 +36,8 @@
     }
   },
   "dependencies": {
-    "@agentic-erp/llm": "0.1.2",
-    "@agentic-erp/mcp-contract": "0.1.2",
+    "@agentic-erp/llm": "0.2.0",
+    "@agentic-erp/mcp-contract": "0.2.0",
     "ajv": "8.20.0",
     "ajv-formats": "3.0.1"
   }

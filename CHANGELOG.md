@@ -2,6 +2,25 @@
 
 Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y versionado semántico.
 
+## [0.2.0] - 2026-11-24
+
+### Agregado
+
+- Agentes por área: cada área del ERP sintético vive en `examples/erp-sintetico/src/agentes/<área>/` con `agente.ts` y su `playbook.md` (el prompt que recibe el modelo). Una prueba verifica que cada playbook solo nombre tools de su agente.
+- Catálogo `docs/agentes/`: una página por área con frases de ejemplo, qué ve la persona y si pide confirmación de alguien. Cada frase citada existe en los evals (lo verifica una prueba). Incluye cómo sumar un área y el mapa de las diez.
+- Seis áreas nuevas en el ERP sintético, cada una con datos deterministas, tools, agente, reglas del router, permisos, pruebas y evals:
+  - Facturación: clientes, facturas con saldo y notas de crédito con motivo obligatorio.
+  - Clientes y cobranzas: estado de cuenta, deudores por antigüedad y cobros imputados a las facturas más viejas.
+  - Pagos a proveedores: cuentas a pagar, agenda de vencimientos y pagos (solo supervisor y gerente). Ante proveedores homónimos el agente pregunta.
+  - Tesorería y bancos: cuentas en USD y ARS, conciliación de los depósitos de caja contra el banco, posición por moneda y transferencias internas.
+  - Precios y listas: listas Minorista, Mayorista y Distribuidores, historial, margen bajo y cambios de precio por valor, porcentaje o margen objetivo.
+  - Gestión del día (solo lectura): cierre del día, resumen del período y alertas de todas las áreas con quién resuelve cada una. Corre también por comando, sin pasar por el modelo.
+- Cada escritura nueva es un par `preparar_*` / `confirmar_*` con el importe calculado por el servidor y confirmación de un supervisor (y motivo, según el caso) por umbrales configurables.
+
+### Cambiado
+
+- Evals dorados: de 31 a 73 frases, todas en verde con el LLM guionado.
+
 ## [0.1.2] - 2026-11-24
 
 ### Agregado
