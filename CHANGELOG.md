@@ -10,7 +10,7 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y 
 
 ### Agregado
 
-- La demo muestra la traza de auditoría (cantidad de eventos) y suma una quinta garantía: la traza no contiene el token ni el PIN.
+- La demo muestra la traza de auditoría (cantidad de eventos) y suma una quinta garantía: la traza no contiene el token ni la credencial de confirmación.
 - Demo grabada: el primer cuadro ya muestra contenido, el cierre dura más y se publican también `demo.mp4` y `demo-final.png`.
 - README: sección "Dónde encaja en el ciclo agéntico", sección "Auditoría" con un extracto real de la traza y diagrama de arquitectura en vertical.
 - ADR-002: la decisión en el vocabulario de la IA agéntica (arquitectura vertical con conductor), el costo aceptado y cómo se cortan las fallas en cascada.
@@ -23,16 +23,16 @@ Primera versión pública.
 
 - Núcleo (`@agentic-erp/core`): un orquestador con agentes de dominio (hasta 15 tools cada uno), router híbrido reglas + LLM, `AgentRunner`, `ProposalStore`, `Compositor`, `Confirmador`, memoria, permisos y trazas.
 - Separación estricta proponer/confirmar: el modelo solo llama `preparar_*`; solo el `Confirmador` llama `confirmar_*` ante un `ui.action` de la persona.
-- El servidor pone los montos; tokens y PIN no llegan al modelo ni a las trazas.
+- El servidor pone los montos; tokens y credenciales de confirmación no llegan al modelo ni a las trazas.
 - Toda corrida termina en `render_ui`, `clarify` o `report_error`.
 - **Modo directo** (protocolo de cliente 1.1): `user.input` puede traer `comando: { tool, args }` en vez de texto. El `Orquestador` ejecuta la tool sin pasar por el modelo, con los mismos permisos, contexto e idempotencia; rechaza siempre `confirmar_*` (`COMANDO_NO_PERMITIDO`); un `preparar_*` sigue el camino de propuesta (`ProposalStore` y `ConfirmationCard` hidratada). Las lecturas se muestran con el componente registrado en `componentesPorTool` o, por defecto, `DetailCard` (objeto) o `DataTable` (lista).
-- **Step-up**: `step_up` es `none | motivo | supervisor | supervisor_y_motivo` en la propuesta, la `ConfirmationCard` y las acciones (`autorizacion` se acepta como alias de `supervisor`). El PIN y el motivo viajan en `confirmar_*` (`autorizacion: { usuario, pin, motivo }`); el motivo puede quedar en trazas y auditoría, el PIN nunca.
+- **Step-up**: `step_up` es `none | motivo | supervisor | supervisor_y_motivo` en la propuesta, la `ConfirmationCard` y las acciones (`autorizacion` se acepta como alias de `supervisor`). La credencial y el motivo viajan en `confirmar_*` (dentro de `autorizacion`); el motivo puede quedar en trazas y auditoría, la credencial de confirmación nunca.
 - `@agentic-erp/llm`: interfaz `LlmProvider`, `ScriptedProvider`, presupuesto de gasto y adaptador compatible con `/chat/completions`.
-- `@agentic-erp/mcp-contract`: tipos, JSON Schema, verificación de conformidad y `CONTRACT.md`; `hashPin` y `verificarPin` (scrypt, tiempo constante) y los helpers `stepUpDe`, `pideSupervisor`, `pideMotivo` y `faltanteDeStepUp`.
+- `@agentic-erp/mcp-contract`: tipos, JSON Schema, verificación de conformidad y `CONTRACT.md`; verificación de credenciales de referencia (scrypt, tiempo constante) y los helpers `stepUpDe`, `pideSupervisor`, `pideMotivo` y `faltanteDeStepUp`.
 - **Kit de servidor conforme** en `mcp-contract`: `canonico`, `hashPayload`, `emitirToken`, `tokenCoincide`, `claveIdempotencia`, `hashEntrada`, el puerto `RegistroIdempotencia` con `RegistroIdempotenciaMemoria`, y `consultarIdempotencia` / `registrarIdempotencia`.
 - `@agentic-erp/mcp-client`: cliente MCP (stdio, HTTP, en memoria) y cliente compuesto.
 - `contracts/genui`: componentes genéricos versionados (JSON Schema). El mensaje de cliente acepta `v` `1.0` y `1.1` (`comando` exige `1.1`); el sobre del servidor está en `1.0`.
-- ERP sintético de ejemplo (ventas, stock, compras, caja) sobre el kit, con 4 agentes y reglas del router. Egresos de caja desde 500.00 piden supervisor, desde 2000.00 supervisor y motivo, e ingresos desde 500.00 piden motivo (umbrales configurables). Los PIN de los autorizadores se guardan con scrypt y nadie puede autorizarse a sí mismo.
-- Demo de terminal (`npm run demo`, `docs/demo/demo.gif`): propuesta, PIN del supervisor y escritura, offline con LLM guionado.
+- ERP sintético de ejemplo (ventas, stock, compras, caja) sobre el kit, con 4 agentes y reglas del router. Egresos de caja desde 500.00 piden supervisor, desde 2000.00 supervisor y motivo, e ingresos desde 500.00 piden motivo (umbrales configurables). Las credenciales de los autorizadores se guardan con scrypt y nadie puede autorizarse a sí mismo.
+- Demo de terminal (`npm run demo`, `docs/demo/demo.gif`): propuesta, credencial del supervisor y escritura, offline con LLM guionado.
 - 31 evals dorados offline con desglose por router, plan, tools y componente, más tokens y costo de la corrida cuando se corren contra un modelo real con tope de gasto.
 - Pruebas de seguridad de punta a punta, ADRs, CI en GitHub Actions y plantillas de comunidad.

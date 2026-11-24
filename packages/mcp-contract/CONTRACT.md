@@ -77,7 +77,7 @@ El servidor debe, en este orden:
 3. Comparar el token en tiempo constante (`TOKEN_INVALIDO`).
 4. Si ya estaba confirmada: con la misma `idempotency_key` devolver el mismo resultado con `idempotente: true`; con otra, `PROPUESTA_YA_CONFIRMADA`.
 5. Verificar vencimiento (`PROPUESTA_EXPIRADA`).
-6. Si la propuesta tiene step-up: exigir lo que pide su nivel en `autorizacion` (`STEP_UP_REQUERIDO` si falta) y validarlo (`AUTORIZACION_INVALIDA` si el usuario o el PIN no sirven, `PARAMETRO_INVALIDO` si el motivo no cumple el largo). El PIN lo verifica el servidor; el orquestador solo lo transporta.
+6. Si la propuesta tiene step-up: exigir lo que pide su nivel en `autorizacion` (`STEP_UP_REQUERIDO` si falta) y validarlo (`AUTORIZACION_INVALIDA` si el usuario o la credencial no sirven, `PARAMETRO_INVALIDO` si el motivo no cumple el largo). La credencial la verifica el servidor; el orquestador solo lo transporta.
 7. Aplicar el efecto **a lo que dice la propuesta guardada**, nunca a datos que vengan en la confirmación.
 
 Salida: `{ estado: "confirmado", idempotente, resultado, mensaje }`.
@@ -88,14 +88,14 @@ Salida: `{ estado: "confirmado", idempotente, resultado, mensaje }`.
 |---|---|---|
 | `none` | solo el toque de la persona | no hace falta |
 | `motivo` | un texto obligatorio (hasta 200 caracteres) | `{ motivo }` |
-| `supervisor` | usuario y PIN de otra persona con rol superior | `{ usuario, pin }` |
+| `supervisor` | usuario y credencial de otra persona con rol superior | `{ usuario, pin }` |
 | `supervisor_y_motivo` | las dos cosas | `{ usuario, pin, motivo }` |
 
 - `autorizacion` (el valor anterior de la acción de la tarjeta) sigue aceptándose como alias de `supervisor`.
-- El PIN y el motivo van de la pantalla al servidor dentro de `ui.action` → `confirmar_*`. **Nunca entran al modelo** y el PIN **nunca queda en las trazas** (`redactar` y `quitarSecretos` cubren cualquier campo `pin`). El motivo sí puede quedar en trazas y en la auditoría del servidor.
-- El orquestador solo comprueba que no falte nada y pasa al servidor únicamente lo que el nivel pide. Quién puede autorizar, que sea otra persona y que el PIN sea correcto lo decide el servidor.
-- Una confirmación rechazada por falta de step-up o por un PIN incorrecto **no consume** la propuesta: se puede reintentar.
-- `pin.ts` incluye una referencia para guardar y verificar PIN: `hashPin(pin, sal?)` (scrypt, formato `sal:hash`) y `verificarPin(pin, hash)` (comparación en tiempo constante). Verificá siempre, aunque el usuario no exista (contra un hash de relleno), para que el tiempo de respuesta no delate qué usuarios hay.
+- La credencial y el motivo van de la pantalla al servidor dentro de `ui.action` → `confirmar_*`. **Nunca entran al modelo** y la credencial de confirmación **nunca queda en las trazas** (`redactar` y `quitarSecretos` cubren cualquier campo `pin`). El motivo sí puede quedar en trazas y en la auditoría del servidor.
+- El orquestador solo comprueba que no falte nada y pasa al servidor únicamente lo que el nivel pide. Quién puede autorizar, que sea otra persona y que la credencial de confirmación sea correcta lo decide el servidor.
+- Una confirmación rechazada por falta de step-up o por una credencial incorrecta **no consume** la propuesta: se puede reintentar.
+- `pin.ts` incluye una referencia para guardar y verificar la credencial: `hashPin(pin, sal?)` (scrypt, formato `sal:hash`) y `verificarPin(pin, hash)` (comparación en tiempo constante). Verificá siempre, aunque el usuario no exista (contra un hash de relleno), para que el tiempo de respuesta no delate qué usuarios hay.
 
 El orquestador **no expone** `confirmar_*` al modelo. Las llama el `Confirmador`, a pedido de la persona (`ui.action` con `action_id: "confirmar"`).
 
@@ -114,11 +114,11 @@ El orquestador **no expone** `confirmar_*` al modelo. Las llama el `Confirmador`
 | `emitirToken()` | Token de confirmación aleatorio con prefijo `cft_`. |
 | `tokenCoincide(a, b)` | Comparación en tiempo constante, también con largos distintos. |
 | `claveIdempotencia(contexto, proposalId)` | Clave derivada (misma persona, tenant y propuesta, misma clave) para cuando la superficie no manda la suya. |
-| `hashEntrada(entrada)` | Hash de la entrada de una operación sin secretos (token, PIN), sin la clave de idempotencia y sin el contexto. |
+| `hashEntrada(entrada)` | Hash de la entrada de una operación sin secretos (token, credencial), sin la clave de idempotencia y sin el contexto. |
 | `RegistroIdempotencia` | Puerto de la tabla de idempotencia (`obtener` / `guardar`, aislado por tenant). `RegistroIdempotenciaMemoria` es la versión para pruebas. |
 | `consultarIdempotencia` / `registrarIdempotencia` | Resuelven los tres casos: clave nueva (`nueva`), repetición exacta (`repetida`: devolver el resultado guardado con `idempotente: true`) y misma clave con otra entrada (`conflicto`: rechazar con `PARAMETRO_INVALIDO`). |
 
-Un `confirmar_*` típico: verificar rol, encontrar la propuesta, `tokenCoincide`, `consultarIdempotencia`, vencimiento, step-up, aplicar el efecto de la propuesta guardada y `registrarIdempotencia`. Ver `examples/erp-sintetico/src/erp.ts`. Guardá el resultado de idempotencia solo cuando el efecto se aplicó: un PIN incorrecto o un token inválido no deben consumir la clave.
+Un `confirmar_*` típico: verificar rol, encontrar la propuesta, `tokenCoincide`, `consultarIdempotencia`, vencimiento, step-up, aplicar el efecto de la propuesta guardada y `registrarIdempotencia`. Ver `examples/erp-sintetico/src/erp.ts`. Guardá el resultado de idempotencia solo cuando el efecto se aplicó: una credencial incorrecta o un token inválido no deben consumir la clave.
 
 ## 7. Versionado
 

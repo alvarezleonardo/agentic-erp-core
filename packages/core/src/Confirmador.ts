@@ -11,8 +11,8 @@ export interface SolicitudConfirmacion {
   /** Si la superficie no manda una, se deriva del proposal_id: un doble toque nunca ejecuta dos veces. */
   idempotencyKey?: string | undefined;
   /**
-   * Lo que pidió el step-up de la propuesta: usuario y PIN de quien autoriza y/o el motivo. Pasan al servidor,
-   * que es quien los verifica; el PIN nunca llega al modelo ni a las trazas.
+   * Lo que pidió el step-up de la propuesta: usuario y credencial de quien autoriza y/o el motivo. Pasan al servidor,
+   * que es quien los verifica; la credencial de confirmación nunca llega al modelo ni a las trazas.
    */
   autorizacion?: Autorizacion | undefined;
 }
@@ -78,7 +78,7 @@ export class Confirmador {
     const nivel = nivelExigido(f, this.o.requiereStepUp);
     const faltante = faltanteDeStepUp(nivel, sol.autorizacion);
     if (faltante) {
-      // No se consume nada: la propuesta sigue abierta y la superficie pide lo que falta (PIN y/o motivo).
+      // No se consume nada: la propuesta sigue abierta y la superficie pide lo que falta (credencial y/o motivo).
       t('confirmacion_rechazada', { codigo: 'STEP_UP_REQUERIDO', step_up: nivel });
       return falla('STEP_UP_REQUERIDO', faltante.mensaje, faltante.accion_sugerida);
     }
@@ -90,7 +90,7 @@ export class Confirmador {
 
     const token = this.store.tokenDe(f.id);
     if (!token) return falla('PROPUESTA_NO_VIGENTE', 'Esa propuesta ya no está vigente.');
-    // El PIN no se registra ni como valor (redactar() lo taparía igual); el motivo sí puede quedar en la traza.
+    // La credencial de confirmación no se registra ni como valor (redactar() lo taparía igual); el motivo sí puede quedar en la traza.
     t('confirmacion_enviada', { tool: confirmarDe(f.tool), step_up: nivel, con_autorizacion: Boolean(autorizacion?.pin), ...(autorizacion?.motivo ? { motivo: autorizacion.motivo } : {}) });
     const r = await this.herramientas.confirmar(
       confirmarDe(f.tool),
@@ -99,7 +99,7 @@ export class Confirmador {
     );
     if (!r.ok) {
       const codigo = typeof r.datos['codigo'] === 'string' ? r.datos['codigo'] : 'CONFIRMACION_FALLIDA';
-      // Un rechazo definitivo del servidor cierra la propuesta; uno corregible (PIN mal) la deja abierta.
+      // Un rechazo definitivo del servidor cierra la propuesta; uno corregible (credencial incorrecta) la deja abierta.
       if (['PROPUESTA_EXPIRADA', 'PROPUESTA_YA_CONFIRMADA', 'PROPUESTA_NO_ENCONTRADA'].includes(codigo)) this.store.marcar(f.id, 'abandonada');
       t('confirmacion_rechazada', { codigo, origen: 'servidor' });
       const accion = typeof r.datos['accion_sugerida'] === 'string' ? r.datos['accion_sugerida'] : undefined;
@@ -117,7 +117,7 @@ function nivelExigido(f: Fuente, politica: ((f: Fuente) => boolean) | undefined)
   return !pideSupervisor(declarado) && (politica?.(f) ?? false) ? (pideMotivo(declarado) ? 'supervisor_y_motivo' : 'supervisor') : declarado;
 }
 
-/** Solo viaja al servidor lo que el nivel pide: si no se pide supervisor, un PIN que la pantalla haya mandado de más no sale de acá. */
+/** Solo viaja al servidor lo que el nivel pide: si no se pide supervisor, una credencial que la pantalla haya mandado de más no sale de acá. */
 function depurarAutorizacion(nivel: StepUp, a: Autorizacion | undefined): Autorizacion | undefined {
   if (!a) return undefined;
   const out: Autorizacion = {};

@@ -8,7 +8,7 @@ export interface AccionCatalogo {
   kind: 'primary' | 'secondary' | 'ghost' | 'danger';
   confirms?: boolean;
   /**
-   * Qué pide la superficie al confirmar, dentro del componente: `motivo` (texto obligatorio), `supervisor` (usuario y PIN de
+   * Qué pide la superficie al confirmar, dentro del componente: `motivo` (texto obligatorio), `supervisor` (usuario y credencial de
    * otra persona) o `supervisor_y_motivo`. `autorizacion` es el nombre anterior de `supervisor`.
    */
   step_up?: StepUp | 'autorizacion';

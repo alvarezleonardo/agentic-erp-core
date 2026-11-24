@@ -1,8 +1,8 @@
 import { randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
 
 /**
- * Referencia para el SERVIDOR (no la usa el orquestador): cómo guardar y verificar el PIN de quien autoriza un
- * step-up. El PIN se guarda con scrypt y sal propia, nunca en claro; la verificación compara en tiempo constante.
+ * Referencia para el SERVIDOR (no la usa el orquestador): cómo guardar y verificar la credencial de quien autoriza un
+ * step-up. La credencial de confirmación se guarda con scrypt y sal propia, nunca en claro; la verificación compara en tiempo constante.
  * Un servidor real puede usar otro algoritmo (argon2, bcrypt): lo que importa es no guardarlo reversible.
  */
 
@@ -15,7 +15,7 @@ export function hashPin(pin: string, sal: string = randomBytes(LARGO_SAL).toStri
   return `${sal}:${scryptSync(pin, sal, LARGO_CLAVE).toString('hex')}`;
 }
 
-/** ¿El PIN corresponde al hash guardado (`sal:hash`)? Comparación en tiempo constante; un hash mal formado da `false`. */
+/** ¿La credencial de confirmación corresponde al hash guardado (`sal:hash`)? Comparación en tiempo constante; un hash mal formado da `false`. */
 export function verificarPin(pin: string, hash: string): boolean {
   const [sal, esperado, ...resto] = hash.split(':');
   if (!sal || !esperado || resto.length || !/^[0-9a-f]+$/i.test(esperado)) return false;

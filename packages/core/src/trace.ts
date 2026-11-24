@@ -18,7 +18,7 @@ export interface OpcionesTrace {
 
 /**
  * Traza JSONL por intención: router, agente, tools, propuestas, validaciones.
- * Todo pasa por redactar(): ningún token, PIN ni clave de API llega al disco ni a la memoria.
+ * Todo pasa por redactar(): ningún token, credencial de confirmación ni clave de API llega al disco ni a la memoria.
  */
 export class Trace {
   readonly eventos: EventoTraza[] = [];

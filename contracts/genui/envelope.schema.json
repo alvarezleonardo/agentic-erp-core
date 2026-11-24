@@ -58,7 +58,7 @@
         "label": { "type": "string", "minLength": 1, "maxLength": 32 },
         "kind": { "enum": ["primary", "secondary", "ghost", "danger"] },
         "confirms": { "type": "boolean", "description": "Solo el catálogo del servidor decide qué acciones confirman." },
-        "step_up": { "enum": ["none", "motivo", "supervisor", "supervisor_y_motivo", "autorizacion"], "description": "Qué pide la superficie dentro del componente antes de confirmar: motivo (texto obligatorio), supervisor (usuario y PIN de otra persona con rol superior) o supervisor_y_motivo. autorizacion es el nombre anterior de supervisor y se sigue aceptando." }
+        "step_up": { "enum": ["none", "motivo", "supervisor", "supervisor_y_motivo", "autorizacion"], "description": "Qué pide la superficie dentro del componente antes de confirmar: motivo (texto obligatorio), supervisor (usuario y credencial de otra persona con rol superior) o supervisor_y_motivo. autorizacion es el nombre anterior de supervisor y se sigue aceptando." }
       }
     }
   }

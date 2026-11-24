@@ -14,7 +14,7 @@ describe('quitarSecretos y redactar', () => {
     expect(quitarSecretos({ pinza: 1, pintura: 2, pin: 3 })).toEqual({ pinza: 1, pintura: 2 });
   });
 
-  it('la autorización de un step-up: el PIN se quita y se redacta, el motivo queda', () => {
+  it('la autorización de un step-up: la credencial de confirmación se quita y se redacta, el motivo queda', () => {
     const autorizacion = { usuario: 'sup1', pin: '2468', motivo: 'Pago de flete' };
     expect(quitarSecretos({ autorizacion })).toEqual({ autorizacion: { usuario: 'sup1', motivo: 'Pago de flete' } });
     expect(redactar({ autorizacion })).toEqual({ autorizacion: { usuario: 'sup1', pin: '[redactado]', motivo: 'Pago de flete' } });

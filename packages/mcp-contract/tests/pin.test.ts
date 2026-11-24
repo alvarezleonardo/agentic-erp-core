@@ -2,14 +2,14 @@ import { describe, expect, it } from 'vitest';
 import { hashPin, verificarPin } from '../src/index.js';
 
 describe('hashPin / verificarPin (referencia para el servidor)', () => {
-  it('verifica el PIN correcto y rechaza uno incorrecto', () => {
+  it('verifica la credencial correcta y rechaza una incorrecta', () => {
     const h = hashPin('2468');
     expect(verificarPin('2468', h)).toBe(true);
     expect(verificarPin('2469', h)).toBe(false);
     expect(verificarPin('', h)).toBe(false);
   });
 
-  it('el hash no contiene el PIN, usa formato sal:hash y la sal aleatoria distingue dos hashes del mismo PIN', () => {
+  it('el hash no contiene la credencial de confirmación, usa formato sal:hash y la sal aleatoria distingue dos hashes de la misma credencial', () => {
     const a = hashPin('2468');
     const b = hashPin('2468');
     expect(a).toMatch(/^[0-9a-f]{32}:[0-9a-f]{64}$/);

@@ -37,7 +37,6 @@ export interface OpcionesDemo {
 
 const FRASE = 'registrá un egreso de caja de 85 por limpieza';
 const dormir = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
-const enmascarar = (pin: string): string => '*'.repeat(pin.length);
 const plural = (n: number, sufijo = ''): string => `${n} ${n === 1 ? 'movimiento' : 'movimientos'}${sufijo && n !== 1 ? `${sufijo}s` : sufijo}`;
 
 /** Formato de la demo con la moneda que informa el servidor: `USD 12.450,75`. */
@@ -50,7 +49,7 @@ export const formatoMonto = (monto: string, moneda: string): string => {
 const visible = (s: string): number => s.replace(/\x1b\[[0-9;]*m/g, '').length;
 
 /**
- * Flujo completo sin red ni claves: frase -> tarjeta con el monto puesto por el servidor MCP -> PIN del supervisor
+ * Flujo completo sin red ni claves: frase -> tarjeta con el monto puesto por el servidor MCP -> confirmación del supervisor
  * (step-up) -> escritura confirmada. El LLM es un ScriptedProvider: solo "dice" el tool y el componente; el importe
  * que se muestra viene del servidor. Cada garantía del cierre se verifica en runtime contra lo que pasó de verdad.
  */
@@ -90,8 +89,8 @@ export async function correrDemo(o: OpcionesDemo = {}): Promise<SalidaDemo> {
     const sesion = d.orquestador.crearSesion(contextoDe('operador'));
     const inicio = d.erp.datos.movimientos.length;
 
-    out(negrita('El modelo propone, el servidor pone el monto, la persona confirma con PIN.'));
-    out(tenue('Mirá: quién pone el monto, por dónde viaja el PIN, cuándo se escribe.'));
+    out(negrita('El modelo propone, el servidor pone el monto, quien corresponde confirma.'));
+    out(tenue('Mirá: quién pone el monto, por dónde viaja la confirmación, cuándo se escribe.'));
     out(`ERP al empezar: ${amarillo(plural(inicio))} de caja (se cuentan los nuevos)`);
     if (pausa) await dormir(pausa);
 
@@ -113,12 +112,12 @@ export async function correrDemo(o: OpcionesDemo = {}): Promise<SalidaDemo> {
     out(`           ${args}`);
     out(`  ${negrita('SERVIDOR')} devolvió ConfirmationCard: ${String(data['titulo'])}`);
     out(`           monto ${negrita(formatoMonto(total.monto, total.moneda))} (calculado por el servidor)`);
-    out(`           pide PIN: ${stepUp && stepUp !== 'none' ? `sí, ${stepUp}` : 'no'}`);
+    out(`           pide confirmación de: ${stepUp && stepUp !== 'none' ? stepUp : 'nadie más'}`);
     const trasPropuesta = d.erp.datos.movimientos.length;
     out(`  ERP: ${amarillo(plural(trasPropuesta - inicio, ' nuevo'))}, todavía no se escribió nada`);
 
-    await paso(3, 'El supervisor confirma con su PIN');
-    out(`  supervisor1  PIN ${enmascarar(pin)}   pantalla -> servidor`);
+    await paso(3, 'supervisor1 confirma');
+    out(`  supervisor1 confirma   pantalla -> servidor`);
     out(tenue('  (el modelo no está en este camino)'));
     const accion = (tarjeta['actions'] as Obj[]).find((a) => a['id'] === 'confirmar');
     const respuesta = await sesion.manejar({
@@ -154,7 +153,7 @@ export async function correrDemo(o: OpcionesDemo = {}): Promise<SalidaDemo> {
     const renderArgs = llamadasDelModelo.find((l) => l.name === 'render_ui')?.args ?? {};
     const garantias: Garantia[] = [
       {
-        texto: 'El modelo no escribió nada: ninguna confirmar_*, 0 movimientos antes del PIN',
+        texto: 'El modelo no escribió nada: ninguna confirmar_*, 0 movimientos antes de la confirmación',
         ok: !llamadasDelModelo.some((l) => l.name.startsWith('confirmar_')) && trasPropuesta === inicio,
       },
       {
@@ -162,16 +161,16 @@ export async function correrDemo(o: OpcionesDemo = {}): Promise<SalidaDemo> {
         ok: !!propuesta && propuesta.monto === total.monto && propuesta.moneda === total.moneda && !('total' in renderArgs) && !('monto' in renderArgs),
       },
       {
-        texto: 'El modelo nunca vio el token ni el PIN',
+        texto: 'El modelo nunca vio el token ni la autorización del supervisor',
         ok: token.length > 16 && !visto.includes(token) && !visto.includes(pin),
       },
       {
-        texto: 'Se escribió solo después de confirmar: 1 movimiento, tras el PIN',
+        texto: 'Se escribió solo después de confirmar: 1 movimiento, tras la confirmación',
         ok: finalMovs === inicio + 1 && movs.length === 1 && td['nivel'] !== 'error',
       },
       {
-        texto: 'La traza de auditoría no contiene el token ni el PIN',
-        // El PIN se busca como valor JSON (entre comillas): los ids aleatorios de la traza podrían contener esos dígitos.
+        texto: 'La traza de auditoría no contiene el token ni la autorización del supervisor',
+        // La credencial se busca como valor JSON (entre comillas): los ids aleatorios de la traza podrían contener esos dígitos.
         ok: eventos.length > 0 && !d.trace.serializado().includes(token) && !d.trace.serializado().includes(JSON.stringify(pin)),
       },
     ];

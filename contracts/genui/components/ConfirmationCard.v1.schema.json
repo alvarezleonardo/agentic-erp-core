@@ -33,7 +33,7 @@
     "total": { "$ref": "../envelope.schema.json#/$defs/money", "x-source": "proposal" },
     "advertencias": { "type": "array", "x-source": "proposal", "items": { "type": "string", "maxLength": 200 } },
     "requiere_step_up": { "type": "boolean", "x-source": "proposal" },
-    "step_up": { "enum": ["motivo", "supervisor", "supervisor_y_motivo"], "x-source": "proposal", "description": "Qué pide la tarjeta al confirmar: un motivo escrito, usuario y PIN de un supervisor, o ambos. Ausente = alcanza con confirmar. El PIN y el motivo viajan en ui.action (confirmation.step_up), nunca por el modelo." },
+    "step_up": { "enum": ["motivo", "supervisor", "supervisor_y_motivo"], "x-source": "proposal", "description": "Qué pide la tarjeta al confirmar: un motivo escrito, usuario y credencial de un supervisor, o ambos. Ausente = alcanza con confirmar. La credencial y el motivo viajan en ui.action (confirmation.step_up), nunca por el modelo." },
     "expira_en": { "type": "string", "format": "date-time", "x-source": "proposal" },
     "confirmation_token": { "type": "string", "x-source": "proposal", "x-hidden": true }
   }

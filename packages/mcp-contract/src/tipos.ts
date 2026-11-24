@@ -89,19 +89,19 @@ export interface Propuesta {
  * Nivel de step-up de una confirmación:
  * - `none`: alcanza con el toque de la persona.
  * - `motivo`: la persona escribe un texto obligatorio.
- * - `supervisor`: usuario y PIN de otra persona con rol superior.
+ * - `supervisor`: usuario y credencial de otra persona con rol superior.
  * - `supervisor_y_motivo`: las dos cosas.
  */
 export type StepUp = 'none' | 'motivo' | 'supervisor' | 'supervisor_y_motivo';
 
 /**
  * Lo que viaja de la pantalla al servidor dentro de `confirmar_*`. Nunca pasa por el modelo ni por las trazas
- * (el PIN); el motivo sí puede quedar en auditoría y trazas.
+ * (la credencial de confirmación); el motivo sí puede quedar en auditoría y trazas.
  */
 export interface Autorizacion {
   /** Quien autoriza (step-up `supervisor`). */
   usuario?: string;
-  /** PIN de quien autoriza. Lo verifica el servidor; el orquestador solo lo transporta. */
+  /** Credencial de quien autoriza. Lo verifica el servidor; el orquestador solo lo transporta. */
   pin?: string;
   /** Texto de la persona (step-up `motivo`). */
   motivo?: string;

@@ -44,6 +44,6 @@ Un cambio que rompa alguno de estos no se acepta (ver [ADR-001](../docs/adr/ADR-
 
 - El modelo nunca llama a `confirmar_*`: solo el `Confirmador`, ante un `ui.action` de la persona.
 - El servidor pone los montos: el modelo no escribe importes ni los dice con cifras.
-- Los tokens de confirmación y los PIN quedan fuera del modelo y de las trazas.
+- Los tokens de confirmación y las credenciales quedan fuera del modelo y de las trazas.
 
 Para reportar una vulnerabilidad, seguí [SECURITY.md](SECURITY.md) en vez de abrir un issue.

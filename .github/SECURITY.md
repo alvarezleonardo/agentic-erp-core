@@ -16,10 +16,10 @@ Usá el reporte privado de GitHub: en el repositorio, pestaña **Security**, bot
 ## Qué está en alcance
 
 - Orquestador y núcleo (`packages/core`): router, runner de agentes, `ProposalStore`, `Compositor`, `Confirmador`.
-- Contrato MCP (`packages/mcp-contract`) y su verificación de conformidad, incluido el kit de servidor (token, idempotencia, PIN).
+- Contrato MCP (`packages/mcp-contract`) y su verificación de conformidad, incluido el kit de servidor (token, idempotencia, credencial).
 - GenUI (`contracts/genui`): componentes y validación de lo que llega a la pantalla.
 
-Casos típicos: que el modelo logre confirmar una escritura, que filtre un token de confirmación o un PIN, que consiga fijar un monto, o que un `comando` del modo directo salte los permisos.
+Casos típicos: que el modelo logre confirmar una escritura, que filtre un token de confirmación o una credencial, que consiga fijar un monto, o que un `comando` del modo directo salte los permisos.
 
 ## Qué queda fuera de alcance
 

@@ -18,7 +18,7 @@ export interface LlmToolCall {
 export interface LlmToolResult {
   callId: string;
   name: string;
-  /** Resultado ya saneado (sin tokens ni PIN). */
+  /** Resultado ya saneado (sin tokens ni credencial). */
   result: unknown;
 }
 

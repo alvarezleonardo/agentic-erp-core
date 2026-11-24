@@ -153,7 +153,7 @@ export class ErpSintetico {
   private readonly cierres: CierreCaja[];
   private contadorPropuestas = 0;
   private readonly reloj: () => Date;
-  /** Los PIN se guardan con scrypt (`hashPin`), nunca en claro. */
+  /** Las credenciales se guardan con scrypt (`hashPin`), nunca en claro. */
   private readonly autorizadores: Record<string, { pinHash: string; rol: string }>;
   private readonly vigenciaMs: number;
   private readonly idempotencia: RegistroIdempotencia;
@@ -757,11 +757,11 @@ export class ErpSintetico {
     if (p.stepUp !== 'none') {
       const au = esObjeto(a['autorizacion']) ? a['autorizacion'] : undefined;
       if (pideSupervisor(p.stepUp)) {
-        if (!au || typeof au['usuario'] !== 'string' || typeof au['pin'] !== 'string') throw new ErrorErp('STEP_UP_REQUERIDO', 'Esta operación necesita la autorización de un supervisor.', 'Ingresá usuario y PIN de quien autoriza.');
+        if (!au || typeof au['usuario'] !== 'string' || typeof au['pin'] !== 'string') throw new ErrorErp('STEP_UP_REQUERIDO', 'Esta operación necesita la autorización de un supervisor.', 'Ingresá usuario y credencial de quien autoriza.');
         const reg = this.autorizadores[au['usuario']];
         const pinOk = verificarPin(au['pin'], reg?.pinHash ?? PIN_HASH_RELLENO);
         // Tiene que ser OTRA persona con rol superior: nadie se autoriza a sí mismo.
-        if (!reg || !pinOk || !ROLES_AUTORIZADORES.includes(reg.rol) || au['usuario'] === ctx.usuario) throw new ErrorErp('AUTORIZACION_INVALIDA', 'Usuario o PIN de autorización incorrectos.', 'Probá de nuevo.');
+        if (!reg || !pinOk || !ROLES_AUTORIZADORES.includes(reg.rol) || au['usuario'] === ctx.usuario) throw new ErrorErp('AUTORIZACION_INVALIDA', 'Usuario o credencial de autorización incorrectos.', 'Probá de nuevo.');
         autorizo = au['usuario'];
       }
       if (pideMotivo(p.stepUp)) {

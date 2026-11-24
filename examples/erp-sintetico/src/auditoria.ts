@@ -4,7 +4,7 @@ import { crearDespliegue, contextoDe, PIN_SUPERVISOR_DE_PRUEBA } from './index.j
 
 type Obj = Record<string, unknown>;
 
-export type Escenario = 'feliz' | 'pin_incorrecto' | 'reintento';
+export type Escenario = 'feliz' | 'autorizacion_invalida' | 'reintento';
 
 export interface SalidaAuditoria {
   escenario: Escenario;
@@ -14,7 +14,7 @@ export interface SalidaAuditoria {
   movimientosNuevos: number;
   /** Respuestas de la confirmación (una por intento). */
   respuestas: Obj[][];
-  /** true si ni el token ni el PIN aparecen en la traza (el PIN se busca como valor JSON). */
+  /** true si ni el token ni la autorización del supervisor aparecen en la traza (la credencial se busca como valor JSON). */
   sinSecretos: boolean;
 }
 
@@ -36,7 +36,7 @@ export async function correrAuditoria(escenario: Escenario): Promise<SalidaAudit
     if (!tarjeta) throw new Error('No se devolvió una ConfirmationCard');
     const data = tarjeta['data'] as Obj;
     const token = String(data['confirmation_token']);
-    const pin = escenario === 'pin_incorrecto' ? '0000' : PIN_SUPERVISOR_DE_PRUEBA;
+    const pin = escenario === 'autorizacion_invalida' ? '0000' : PIN_SUPERVISOR_DE_PRUEBA;
     const confirmar = (messageId: string): Promise<Obj[]> =>
       sesion.manejar({
         v: '1.1',
@@ -63,7 +63,7 @@ export async function correrAuditoria(escenario: Escenario): Promise<SalidaAudit
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
-  for (const e of ['feliz', 'pin_incorrecto', 'reintento'] as const) {
+  for (const e of ['feliz', 'autorizacion_invalida', 'reintento'] as const) {
     const s = await correrAuditoria(e);
     console.log(`# ${e}: movimientos nuevos=${s.movimientosNuevos}, sin secretos=${s.sinSecretos}`);
     console.log(s.jsonl);

@@ -31,7 +31,7 @@ body:
     id: reproducir
     attributes:
       label: Cómo reproducirlo
-      description: Pasos o un fragmento de código mínimo. No incluyas claves, tokens ni PIN.
+      description: Pasos o un fragmento de código mínimo. No incluyas claves, tokens ni credenciales.
     validations:
       required: true
   - type: input
