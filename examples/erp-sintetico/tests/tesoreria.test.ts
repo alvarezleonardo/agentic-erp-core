@@ -6,10 +6,9 @@ const gerente = contextoDe('gerente');
 const operador = contextoDe('operador');
 const CLAVE_SUPERVISOR = '2468';
 /** Nombre del campo de la credencial en el contrato de autorización. */
-const CAMPO_CLAVE = 'pi' + 'n';
-const autorizadores = { supervisor1: { [CAMPO_CLAVE]: CLAVE_SUPERVISOR, rol: 'supervisor' } as NonNullable<OpcionesErp['autorizadores']>[string] };
+const autorizadores = { supervisor1: { pin: CLAVE_SUPERVISOR, rol: 'supervisor' } as NonNullable<OpcionesErp['autorizadores']>[string] };
 const nuevoErp = (opciones: OpcionesErp = {}): ErpSintetico => new ErpSintetico({ autorizadores, ...opciones });
-const supervisor = { autorizacion: { usuario: 'supervisor1', [CAMPO_CLAVE]: CLAVE_SUPERVISOR } };
+const supervisor = { autorizacion: { usuario: 'supervisor1', pin: CLAVE_SUPERVISOR } };
 const args = (p: { proposal_id: string; confirmation_token: string }, extra: Obj = {}, clave = 'idk_tesoreria_0001'): Obj => ({ proposal_id: p.proposal_id, confirmation_token: p.confirmation_token, idempotency_key: clave, ...extra });
 const cent = (d: unknown): number => Number(String((d as { monto: string }).monto).replace('.', ''));
 const saldo = (erp: ErpSintetico, id: string): number => saldoDeCuenta(erp.datos.cuentasBancarias.find((c) => c.id === id)!, erp.datos.movimientosBancarios);
@@ -279,7 +278,7 @@ describe('confirmar transferencia interna', () => {
     const erp = nuevoErp();
     const p = erp.prepararTransferenciaInterna({ cuenta_origen_id: NACION, cuenta_destino_id: GALICIA, importe: '6000' }, operador);
     await expect(erp.confirmar('transferencia_interna', args(p), operador)).rejects.toMatchObject({ codigo: 'STEP_UP_REQUERIDO' });
-    await expect(erp.confirmar('transferencia_interna', args(p, { autorizacion: { usuario: 'supervisor1', [CAMPO_CLAVE]: 'mal' } }), operador)).rejects.toMatchObject({ codigo: 'AUTORIZACION_INVALIDA' });
+    await expect(erp.confirmar('transferencia_interna', args(p, { autorizacion: { usuario: 'supervisor1', pin: 'mal' } }), operador)).rejects.toMatchObject({ codigo: 'AUTORIZACION_INVALIDA' });
     expect(erp.datos.transferenciasInternas).toHaveLength(0);
     const ok = await erp.confirmar('transferencia_interna', args(p, supervisor), operador);
     expect(ok.estado).toBe('confirmado');
