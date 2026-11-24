@@ -33,7 +33,7 @@ import {
   type StepUp,
   type ValorMetrica,
 } from '@agentic-erp/mcp-contract';
-import { ANOMALIA_CAJA, HOY, INICIO_DATOS, MONEDA, estadoDeFactura, estadoDeFacturaProveedor, generarDatos, saldoDeFactura, saldoDeFacturaProveedor, type Articulo, type Cliente, type Cobranza, type DatosErp, type Factura, type FacturaProveedor, type MedioCobro, type MedioPago, type MovimientoCaja, type NotaCredito, type OrdenCompra, type PagoProveedor, type Proveedor } from './datos.js';
+import { ANOMALIA_CAJA, HOY, INICIO_DATOS, MONEDA, VENTANA_ACREDITACION_DIAS, estadoDeFactura, estadoDeFacturaProveedor, generarDatos, saldoDeCuenta, saldoDeFactura, saldoDeFacturaProveedor, type Articulo, type Cliente, type Cobranza, type CuentaBancaria, type DatosErp, type Factura, type FacturaProveedor, type MedioCobro, type MedioPago, type MovimientoBancario, type MovimientoCaja, type TipoMovimientoBancario, type TransferenciaInterna, type NotaCredito, type OrdenCompra, type PagoProveedor, type Proveedor } from './datos.js';
 import { diaDeSemana, diasEntre, esFecha, rango, sumarDias } from './fechas.js';
 import { ROLES_AUTORIZADORES, ROLES_POR_ESCRITURA } from './permisos.js';
 
@@ -67,6 +67,8 @@ export interface OpcionesErp {
   umbralPagoProveedor?: number;
   /** Importe de pago a proveedor, en centavos, desde el cual se pide además el motivo. Por defecto 5000.00. */
   umbralMotivoPagoProveedor?: number;
+  /** Importe de transferencia interna entre cuentas propias, en centavos, desde el cual se pide la confirmación de un supervisor. Por defecto 5000.00. */
+  umbralTransferenciaInterna?: number;
 }
 
 type Efecto =
@@ -75,7 +77,8 @@ type Efecto =
   | { tipo: 'movimiento_caja'; mov: Omit<MovimientoCaja, 'id' | 'fecha'> }
   | { tipo: 'nota_credito'; factura_id: string; importe: number; motivo: string }
   | { tipo: 'cobranza'; cliente_id: string; medio: MedioCobro; importe: number }
-  | { tipo: 'pago_proveedor'; proveedor_id: string; medio: MedioPago; importe: number; factura_ids: string[] };
+  | { tipo: 'pago_proveedor'; proveedor_id: string; medio: MedioPago; importe: number; factura_ids: string[] }
+  | { tipo: 'transferencia_interna'; origen_id: string; destino_id: string; importe: number };
 
 interface PropuestaGuardada {
   id: string;
@@ -115,6 +118,9 @@ const UMBRAL_STEP_UP_NOTA_CREDITO = 100_000; // 1000.00: notas de crédito desde
 const UMBRAL_STEP_UP_COBRANZA = 500_000; // 5000.00: cobranzas desde acá piden un supervisor
 const UMBRAL_STEP_UP_PAGO_PROVEEDOR = 100_000; // 1000.00: pagos desde acá piden un supervisor
 const UMBRAL_MOTIVO_PAGO_PROVEEDOR = 500_000; // 5000.00: pagos desde acá piden supervisor y motivo
+const UMBRAL_STEP_UP_TRANSFERENCIA = 500_000; // 5000.00: transferencias internas desde acá piden un supervisor
+const CONCEPTO_DEPOSITO_CAJA = 'Depósito bancario';
+const TIPOS_MOVIMIENTO_BANCARIO: readonly TipoMovimientoBancario[] = ['deposito_caja', 'acreditacion_cliente', 'debito_proveedor', 'comision', 'impuesto', 'transferencia_interna'];
 const MEDIOS_PAGO: readonly MedioPago[] = ['efectivo', 'transferencia'];
 const ETIQUETA_MEDIO_PAGO: Record<MedioPago, string> = { efectivo: 'Efectivo', transferencia: 'Transferencia' };
 const MEDIOS_COBRO: readonly MedioCobro[] = ['efectivo', 'transferencia', 'cheque'];
@@ -138,6 +144,19 @@ const fmt = (centavos: number): string => {
 };
 const dinero = (c: number): Dinero => dineroDeCentavos(c, MONEDA);
 const montoUmbral = (centavos: number): string => dinero(centavos).monto;
+/** Importes de una cuenta bancaria, en la moneda de la cuenta (las cuentas en ARS no son USD). */
+const dineroEn = (centavos: number, moneda: string): Dinero => dineroDeCentavos(centavos, moneda);
+const fmtEn = (centavos: number, moneda: string): string => {
+  const d = dineroEn(centavos, moneda);
+  return `${d.monto} ${d.moneda}`;
+};
+
+/** Resultado de cruzar un depósito de caja con el extracto: ver `conciliarDepositos`. */
+interface DepositoConciliado {
+  deposito: MovimientoCaja;
+  credito: MovimientoBancario | undefined;
+  estado: 'conciliado' | 'con_diferencia' | 'pendiente';
+}
 
 /** Importe tal como lo escribe una persona: «150», «150.5», «150,50». Devuelve centavos. */
 export function parsearImporte(v: unknown): number {
@@ -182,6 +201,7 @@ export class ErpSintetico {
   private readonly umbralCobranza: number;
   private readonly umbralPagoProveedor: number;
   private readonly umbralMotivoPagoProveedor: number;
+  private readonly umbralTransferenciaInterna: number;
 
   constructor(o: OpcionesErp = {}) {
     this.datos = o.datos ?? generarDatos();
@@ -195,6 +215,7 @@ export class ErpSintetico {
     this.umbralCobranza = o.umbralCobranza ?? UMBRAL_STEP_UP_COBRANZA;
     this.umbralPagoProveedor = o.umbralPagoProveedor ?? UMBRAL_STEP_UP_PAGO_PROVEEDOR;
     this.umbralMotivoPagoProveedor = o.umbralMotivoPagoProveedor ?? UMBRAL_MOTIVO_PAGO_PROVEEDOR;
+    this.umbralTransferenciaInterna = o.umbralTransferenciaInterna ?? UMBRAL_STEP_UP_TRANSFERENCIA;
     this.cierres = this.calcularCierres();
     this.sembrarEventos();
   }
@@ -1162,6 +1183,178 @@ export class ErpSintetico {
     return out;
   }
 
+
+  // ------------------------------------------------------------------ tesorería y bancos
+
+  private cuenta(id: unknown): CuentaBancaria {
+    const c = this.datos.cuentasBancarias.find((x) => x.id === id);
+    if (!c) throw new ErrorErp('NO_ENCONTRADO', `No existe la cuenta bancaria ${String(id)}.`, 'Listá las cuentas bancarias y probá de nuevo.');
+    return c;
+  }
+
+  private saldoCuenta(c: CuentaBancaria): number {
+    return saldoDeCuenta(c, this.datos.movimientosBancarios);
+  }
+
+  /** Suma de los saldos de las cuentas de una moneda, en centavos de esa moneda. */
+  private saldoBancos(moneda: string): number {
+    return sumarCentavos(this.datos.cuentasBancarias.filter((c) => c.moneda === moneda).map((c) => this.saldoCuenta(c)));
+  }
+
+  listarCuentasBancarias(): SalidaTabla {
+    const cuentas = this.datos.cuentasBancarias;
+    const totales = [...new Set(cuentas.map((c) => c.moneda))].map((m) => `${m} ${dineroEn(this.saldoBancos(m), m).monto}`).join(', ');
+    return {
+      titulo: `Cuentas bancarias: ${cuentas.length}. Saldo total por moneda: ${totales}`,
+      columnas: [
+        { id: 'cuenta_id', etiqueta: 'Código', tipo: 'texto' },
+        { id: 'nombre', etiqueta: 'Cuenta', tipo: 'texto' },
+        { id: 'moneda', etiqueta: 'Moneda', tipo: 'texto' },
+        { id: 'saldo', etiqueta: 'Saldo', tipo: 'dinero' },
+      ],
+      filas: cuentas.map((c) => ({ cuenta_id: c.id, nombre: c.nombre, moneda: c.moneda, saldo: dineroEn(this.saldoCuenta(c), c.moneda) })),
+      total_filas: cuentas.length,
+    };
+  }
+
+  listarMovimientosBancarios(a: Obj): SalidaTabla {
+    const cuenta = a['cuenta_id'] === undefined ? undefined : this.cuenta(a['cuenta_id']);
+    const desde = a['desde'] === undefined ? undefined : fechaValida(a['desde'], 'desde');
+    const hasta = a['hasta'] === undefined ? undefined : fechaValida(a['hasta'], 'hasta');
+    if (desde && hasta && desde > hasta) throw new ErrorErp('PARAMETRO_INVALIDO', 'desde no puede ser posterior a hasta.');
+    const tipo = a['tipo'];
+    if (tipo !== undefined && !(TIPOS_MOVIMIENTO_BANCARIO as readonly unknown[]).includes(tipo)) throw new ErrorErp('PARAMETRO_INVALIDO', `tipo debe ser uno de ${TIPOS_MOVIMIENTO_BANCARIO.join(', ')}.`);
+    const limite = a['limite'] === undefined ? 100 : entero(a['limite'], 'limite', 1, 200);
+    const todos = this.datos.movimientosBancarios
+      .filter((m) => (!cuenta || m.cuenta_id === cuenta.id) && (!desde || m.fecha >= desde) && (!hasta || m.fecha <= hasta) && (tipo === undefined || m.tipo === tipo))
+      .sort((x, y) => y.fecha.localeCompare(x.fecha) || y.id.localeCompare(x.id));
+    const totales = [...new Set(todos.map((m) => this.cuenta(m.cuenta_id).moneda))].map((moneda) => {
+      const delaMoneda = todos.filter((m) => this.cuenta(m.cuenta_id).moneda === moneda);
+      const creditos = sumarCentavos(delaMoneda.filter((m) => m.sentido === 'credito').map((m) => m.importe));
+      const debitos = sumarCentavos(delaMoneda.filter((m) => m.sentido === 'debito').map((m) => m.importe));
+      return `${moneda} +${dineroEn(creditos, moneda).monto} -${dineroEn(debitos, moneda).monto}`;
+    });
+    return {
+      // El título del DataTable admite hasta 120 caracteres: los totales van compactos (+ créditos, - débitos).
+      titulo: `Movimientos${cuenta ? ` de ${cuenta.nombre}` : ' bancarios'}${desde || hasta ? `, ${desde ?? INICIO_DATOS} a ${hasta ?? HOY}` : ''}: ${todos.length}${totales.length ? `. ${totales.join('; ')}` : ''}`,
+      columnas: [
+        { id: 'movimiento_id', etiqueta: 'Movimiento', tipo: 'texto' },
+        { id: 'fecha', etiqueta: 'Fecha', tipo: 'fecha' },
+        { id: 'cuenta', etiqueta: 'Cuenta', tipo: 'texto' },
+        { id: 'tipo', etiqueta: 'Tipo', tipo: 'estado' },
+        { id: 'concepto', etiqueta: 'Concepto', tipo: 'texto' },
+        { id: 'importe', etiqueta: 'Importe', tipo: 'dinero' },
+      ],
+      filas: todos.slice(0, limite).map((m) => {
+        const c = this.cuenta(m.cuenta_id);
+        return { movimiento_id: m.id, fecha: m.fecha, cuenta: c.nombre, tipo: m.tipo, concepto: m.concepto, importe: dineroEn(m.sentido === 'credito' ? m.importe : -m.importe, c.moneda) };
+      }),
+      total_filas: todos.length,
+    };
+  }
+
+  /**
+   * Cruza TODOS los egresos «Depósito bancario» de caja con los créditos de tipo depósito del extracto. Un crédito corresponde a un
+   * depósito si cae entre el día del egreso y `VENTANA_ACREDITACION_DIAS` días después. Primero se emparejan los de igual importe
+   * (el crédito más antiguo primero) y, con lo que sobra, un depósito sin pareja exacta toma un crédito de otro importe de su ventana:
+   * eso es una diferencia. Lo que no encuentra crédito queda pendiente. El cruce no depende del período pedido: así un crédito no se
+   * le asigna a un depósito de otro día por haber acotado la búsqueda.
+   */
+  private cruzarDepositos(): DepositoConciliado[] {
+    const depositos = this.datos.movimientos.filter((m) => m.tipo === 'egreso' && m.concepto === CONCEPTO_DEPOSITO_CAJA).sort((x, y) => x.fecha.localeCompare(y.fecha) || x.id.localeCompare(y.id));
+    const creditos = this.datos.movimientosBancarios.filter((m) => m.tipo === 'deposito_caja' && m.sentido === 'credito').sort((x, y) => x.fecha.localeCompare(y.fecha) || x.id.localeCompare(y.id));
+    const usados = new Set<string>();
+    const pareja = new Map<string, MovimientoBancario>();
+    const enVentana = (d: MovimientoCaja, c: MovimientoBancario): boolean => c.fecha >= d.fecha && c.fecha <= sumarDias(d.fecha, VENTANA_ACREDITACION_DIAS);
+    for (const d of depositos) {
+      const c = creditos.find((x) => !usados.has(x.id) && x.importe === d.importe && enVentana(d, x));
+      if (c) {
+        usados.add(c.id);
+        pareja.set(d.id, c);
+      }
+    }
+    for (const d of depositos) {
+      if (pareja.has(d.id)) continue;
+      const c = creditos.find((x) => !usados.has(x.id) && enVentana(d, x));
+      if (c) {
+        usados.add(c.id);
+        pareja.set(d.id, c);
+      }
+    }
+    return depositos.map((d) => {
+      const credito = pareja.get(d.id);
+      return { deposito: d, credito, estado: !credito ? 'pendiente' : credito.importe === d.importe ? 'conciliado' : 'con_diferencia' };
+    });
+  }
+
+  conciliarDepositos(a: Obj): SalidaTabla {
+    const desde = fechaValida(a['desde'], 'desde');
+    const hasta = fechaValida(a['hasta'], 'hasta');
+    if (desde > hasta) throw new ErrorErp('PARAMETRO_INVALIDO', 'desde no puede ser posterior a hasta.');
+    const del = this.cruzarDepositos().filter((x) => x.deposito.fecha >= desde && x.deposito.fecha <= hasta);
+    const de = (estado: DepositoConciliado['estado']): DepositoConciliado[] => del.filter((x) => x.estado === estado);
+    const suma = (xs: DepositoConciliado[]): number => sumarCentavos(xs.map((x) => x.deposito.importe));
+    const diferencia = sumarCentavos(de('con_diferencia').map((x) => (x.credito?.importe ?? 0) - x.deposito.importe));
+    const incluir = a['incluir_conciliados'] === true;
+    const filas = del.filter((x) => incluir || x.estado !== 'conciliado');
+    return {
+      // El título del DataTable admite hasta 120 caracteres: los totales van compactos.
+      titulo: `Depósitos ${desde} a ${hasta}: ${del.length}. Conciliados ${de('conciliado').length}, con diferencia ${de('con_diferencia').length} (${fmt(diferencia)}), pendientes ${de('pendiente').length} (${fmt(suma(de('pendiente')))})`,
+      columnas: [
+        { id: 'movimiento_caja_id', etiqueta: 'Movimiento de caja', tipo: 'texto' },
+        { id: 'fecha_caja', etiqueta: 'Fecha en caja', tipo: 'fecha' },
+        { id: 'importe_caja', etiqueta: 'Importe en caja', tipo: 'dinero' },
+        { id: 'movimiento_bancario_id', etiqueta: 'Movimiento bancario', tipo: 'texto' },
+        { id: 'fecha_banco', etiqueta: 'Fecha en el banco', tipo: 'fecha' },
+        { id: 'importe_banco', etiqueta: 'Importe en el banco', tipo: 'dinero' },
+        { id: 'diferencia', etiqueta: 'Diferencia', tipo: 'dinero' },
+        { id: 'estado', etiqueta: 'Estado', tipo: 'estado' },
+      ],
+      filas: filas.map((x) => ({
+        movimiento_caja_id: x.deposito.id,
+        fecha_caja: x.deposito.fecha,
+        importe_caja: dinero(x.deposito.importe),
+        ...(x.credito ? { movimiento_bancario_id: x.credito.id, fecha_banco: x.credito.fecha, importe_banco: dinero(x.credito.importe), diferencia: dinero(x.credito.importe - x.deposito.importe) } : {}),
+        estado: x.estado,
+      })),
+      total_filas: filas.length,
+    };
+  }
+
+  /** Lo que vence entre hoy y hoy más `dias` días en las cuentas a pagar, en centavos. */
+  private vencenEnDias(dias: number): number {
+    const hasta = sumarDias(HOY, dias);
+    return sumarCentavos(this.cuentasAbiertas().filter((f) => f.vencimiento >= HOY && f.vencimiento <= hasta).map((f) => saldoDeFacturaProveedor(f)));
+  }
+
+  posicionTesoreria(): SalidaMetricas {
+    const caja = this.cajaDelDia(HOY).esperado;
+    const bancosUsd = this.saldoBancos('USD');
+    const bancosArs = this.saldoBancos('ARS');
+    const pendienteDebito = sumarCentavos(this.datos.pagosProveedor.filter((x) => x.estado_bancario === 'pendiente_debito').map((x) => x.importe));
+    const vencen = this.vencenEnDias(7);
+    const disponible = caja + bancosUsd - pendienteDebito;
+    const kpi = (id: string, etiqueta: string, centavos: number, moneda: string, favorable: 'mayor_es_mejor' | 'menor_es_mejor'): KpiMetrica => ({
+      id,
+      etiqueta,
+      valor: { tipo: 'moneda', valor: dineroEn(centavos, moneda).monto, moneda },
+      sentido_favorable: favorable,
+    });
+    return {
+      periodo: { desde: HOY, hasta: HOY, etiqueta: `Al ${HOY}` },
+      kpis: [
+        kpi('caja', 'Caja (saldo esperado de hoy)', caja, MONEDA, 'mayor_es_mejor'),
+        kpi('bancos_usd', 'Bancos en USD', bancosUsd, MONEDA, 'mayor_es_mejor'),
+        kpi('pendiente_debito', 'Pagos a proveedores pendientes de débito', pendienteDebito, MONEDA, 'menor_es_mejor'),
+        kpi('disponible', 'Disponible en USD (caja + bancos - pendiente de débito)', disponible, MONEDA, 'mayor_es_mejor'),
+        kpi('vencen_7_dias', 'Vencimientos de proveedores en los próximos 7 días', vencen, MONEDA, 'menor_es_mejor'),
+        kpi('disponible_tras_vencimientos', 'Disponible en USD después de esos vencimientos', disponible - vencen, MONEDA, 'mayor_es_mejor'),
+        kpi('bancos_ars', 'Bancos en ARS (no se suma a los USD)', bancosArs, 'ARS', 'mayor_es_mejor'),
+      ],
+      fuente: { origen: 'ERP sintético (datos de ejemplo)', actualizado_en: `${HOY}T08:00:00.000Z` },
+    };
+  }
+
   // ------------------------------------------------------------------ escrituras: preparar
 
   private exigirRol(tool: string, ctx: ContextoSesion): void {
@@ -1396,6 +1589,39 @@ export class ErpSintetico {
     });
   }
 
+  prepararTransferenciaInterna(a: Obj, ctx: ContextoSesion): Propuesta {
+    this.exigirRol('preparar_transferencia_interna', ctx);
+    const origen = this.cuenta(a['cuenta_origen_id']);
+    const destino = this.cuenta(a['cuenta_destino_id']);
+    if (origen.id === destino.id) throw new ErrorErp('PARAMETRO_INVALIDO', 'La cuenta de origen y la de destino son la misma.', 'Preguntale a la persona a qué otra cuenta quiere transferir.');
+    if (origen.moneda !== destino.moneda) throw new ErrorErp('MONEDAS_DISTINTAS', `${origen.nombre} es en ${origen.moneda} y ${destino.nombre} es en ${destino.moneda}: no se puede transferir entre monedas distintas.`, 'Este ejemplo no hace cambio de moneda: elegí dos cuentas de la misma moneda.');
+    const importe = parsearImporte(a['importe']);
+    const saldoOrigen = this.saldoCuenta(origen);
+    if (importe > saldoOrigen) throw new ErrorErp('SALDO_INSUFICIENTE', `${origen.nombre} tiene ${fmtEn(saldoOrigen, origen.moneda)}: no alcanza para transferir ${fmtEn(importe, origen.moneda)}.`, 'Pedí un importe menor o igual al saldo de la cuenta de origen.');
+    const stepUp: StepUp = importe >= this.umbralTransferenciaInterna ? 'supervisor' : 'none';
+    const p = this.guardar({ tipo: 'transferencia_interna', origen_id: origen.id, destino_id: destino.id, importe }, dineroEn(importe, origen.moneda), stepUp, ctx);
+    this.aud(ctx, 'preparar_transferencia_interna');
+    const saldoDestino = this.saldoCuenta(destino);
+    const advertencias = ['Al confirmar queda un débito en la cuenta de origen y un crédito en la de destino, con la misma fecha.'];
+    if (stepUp !== 'none') advertencias.push(`Las transferencias internas de ${montoUmbral(this.umbralTransferenciaInterna)} o más necesitan la confirmación de un supervisor.`);
+    return this.propuesta(p, {
+      titulo: `Transferencia interna de ${origen.nombre} a ${destino.nombre}`,
+      resumen: [
+        { etiqueta: 'Cuenta de origen', valor: origen.nombre },
+        { etiqueta: 'Cuenta de destino', valor: destino.nombre },
+        { etiqueta: 'Saldo de origen antes', valor: fmtEn(saldoOrigen, origen.moneda) },
+        { etiqueta: 'Saldo de origen después', valor: fmtEn(saldoOrigen - importe, origen.moneda) },
+        { etiqueta: 'Saldo de destino antes', valor: fmtEn(saldoDestino, destino.moneda) },
+        { etiqueta: 'Saldo de destino después', valor: fmtEn(saldoDestino + importe, destino.moneda) },
+      ],
+      lineas: [
+        { descripcion: `Débito en ${origen.nombre}`, importe: dineroEn(importe, origen.moneda) },
+        { descripcion: `Crédito en ${destino.nombre}`, importe: dineroEn(importe, destino.moneda) },
+      ],
+      advertencias,
+    });
+  }
+
   private advertenciaStepUpPago(stepUp: Exclude<StepUp, 'none'>): string {
     return stepUp === 'supervisor_y_motivo'
       ? `Los pagos a proveedores de ${montoUmbral(this.umbralMotivoPagoProveedor)} o más necesitan la confirmación de un supervisor y el motivo.`
@@ -1410,7 +1636,7 @@ export class ErpSintetico {
 
   // ------------------------------------------------------------------ escrituras: confirmar
 
-  async confirmar(tool: 'ajuste_stock' | 'orden_compra' | 'movimiento_caja' | 'nota_credito' | 'cobranza' | 'pago_proveedor', a: Obj, ctx: ContextoSesion): Promise<ConfirmarSalida> {
+  async confirmar(tool: 'ajuste_stock' | 'orden_compra' | 'movimiento_caja' | 'nota_credito' | 'cobranza' | 'pago_proveedor' | 'transferencia_interna', a: Obj, ctx: ContextoSesion): Promise<ConfirmarSalida> {
     this.exigirRol(`preparar_${tool}`, ctx);
     const p = typeof a['proposal_id'] === 'string' ? this.propuestas.get(a['proposal_id']) : undefined;
     if (!p || p.efecto.tipo !== tool) throw new ErrorErp('PROPUESTA_NO_ENCONTRADA', 'No existe esa propuesta.');
@@ -1563,6 +1789,29 @@ export class ErpSintetico {
         ...(p.total ? { total: p.total } : {}),
       };
       mensaje = `Pago ${pago.numero} registrado a ${prov.nombre}.${pago.estado_bancario === 'pendiente_debito' ? ' Queda pendiente de débito bancario.' : ''}`;
+    } else if (e.tipo === 'transferencia_interna') {
+      const origen = this.cuenta(e.origen_id);
+      const destino = this.cuenta(e.destino_id);
+      // Entre preparar y confirmar el saldo pudo bajar (otra transferencia, un débito): se verifica contra el estado real.
+      const saldoOrigen = this.saldoCuenta(origen);
+      if (e.importe > saldoOrigen) throw new ErrorErp('SALDO_INSUFICIENTE', `El saldo de ${origen.nombre} cambió y ya no alcanza para esta transferencia (${fmtEn(saldoOrigen, origen.moneda)}).`, 'Pedí la operación de nuevo.');
+      const n = this.datos.transferenciasInternas.length + 1;
+      const transferencia: TransferenciaInterna = { id: `tri_${String(n).padStart(4, '0')}`, numero: `TI-${String(n).padStart(4, '0')}`, fecha: HOY, origen_id: origen.id, destino_id: destino.id, importe: e.importe };
+      this.datos.transferenciasInternas.push(transferencia);
+      const proximo = this.datos.movimientosBancarios.length + 1;
+      const debito: MovimientoBancario = { id: `mba_${String(proximo).padStart(4, '0')}`, cuenta_id: origen.id, fecha: HOY, sentido: 'debito', tipo: 'transferencia_interna', concepto: `Transferencia interna ${transferencia.numero} a ${destino.nombre}`, importe: e.importe };
+      const credito: MovimientoBancario = { id: `mba_${String(proximo + 1).padStart(4, '0')}`, cuenta_id: destino.id, fecha: HOY, sentido: 'credito', tipo: 'transferencia_interna', concepto: `Transferencia interna ${transferencia.numero} desde ${origen.nombre}`, importe: e.importe };
+      this.datos.movimientosBancarios.push(debito, credito);
+      this.emitir('transferencia_interna_registrada', { transferencia_id: transferencia.id, origen_id: origen.id, destino_id: destino.id });
+      resultado = {
+        transferencia_id: transferencia.id,
+        numero: transferencia.numero,
+        saldo_origen: dineroEn(this.saldoCuenta(origen), origen.moneda),
+        saldo_destino: dineroEn(this.saldoCuenta(destino), destino.moneda),
+        movimientos_bancarios: [debito.id, credito.id],
+        ...(p.total ? { total: p.total } : {}),
+      };
+      mensaje = `Transferencia interna ${transferencia.numero} registrada de ${origen.nombre} a ${destino.nombre}.`;
     } else {
       const mov: MovimientoCaja = { id: `mov_${String(this.datos.movimientos.length + 1).padStart(4, '0')}`, fecha: HOY, ...e.mov };
       this.datos.movimientos.push(mov);
