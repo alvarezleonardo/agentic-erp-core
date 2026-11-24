@@ -27,7 +27,7 @@ Los proveedores y las órdenes de compra son los de compras; esta área suma las
 - La persona puede indicar un importe, unas facturas concretas (por su número) o un alcance: `vencidas` o `vencen_esta_semana` (las que vencen entre hoy y el domingo; no incluye las ya vencidas). Con facturas o alcance y sin importe se paga el saldo completo de ese conjunto; con importe, se imputa dentro del conjunto.
 - El servidor reparte el importe de la factura que vence primero a la que vence último y calcula el saldo que queda en cada una y en total. El agente no calcula nada.
 - Un importe mayor a la deuda del conjunto se rechaza. Este ejemplo no maneja anticipos a proveedores. Al confirmar, el servidor vuelve a repartir contra el estado real: si la deuda cambió desde que se preparó la propuesta y ya no alcanza, rechaza.
-- Si el medio es efectivo, al confirmar el servidor deja además un egreso en la caja de hoy con el concepto «Pago proveedor <proveedor>». Con transferencia no toca la caja: el pago queda registrado con estado `pendiente_debito` hasta que se concilie el débito bancario (eso lo cerrará el área de tesorería, que todavía no existe).
+- Si el medio es efectivo, al confirmar el servidor deja además un egreso en la caja de hoy con el concepto «Pago proveedor <proveedor>». Con transferencia no toca la caja: el pago queda registrado con estado `pendiente_debito` a la espera del débito bancario. El área de [tesorería](tesoreria.md) lo suma en la posición como pendiente de débito; este ejemplo no registra el débito en el extracto bancario.
 
 ## Cuándo pide un supervisor
 
