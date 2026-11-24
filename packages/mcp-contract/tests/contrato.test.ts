@@ -189,7 +189,7 @@ describe('step-up', () => {
     expect(faltanteDeStepUp('motivo', { motivo: 'algo' })).toBeUndefined();
     expect(faltanteDeStepUp('motivo', { motivo: '  ' })?.accion_sugerida).toMatch(/motivo/);
     expect(faltanteDeStepUp('supervisor', { usuario: 'a', pin: '1' })).toBeUndefined();
-    expect(faltanteDeStepUp('supervisor', { usuario: 'a' })?.accion_sugerida).toMatch(/PIN/);
+    expect(faltanteDeStepUp('supervisor', { usuario: 'a' })?.accion_sugerida).toMatch(/credencial/);
     expect(faltanteDeStepUp('supervisor_y_motivo', { usuario: 'a', pin: '1' })?.accion_sugerida).toMatch(/motivo/);
     expect(faltanteDeStepUp('supervisor_y_motivo', undefined)?.mensaje).toMatch(/responsable y un motivo/);
   });

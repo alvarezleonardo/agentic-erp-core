@@ -9,15 +9,15 @@ Framework (TypeScript) para agregarle una capa agéntica a un ERP sin dejar que 
 [![Node >=22](https://img.shields.io/badge/node-%3E%3D22-339933.svg)](.nvmrc)
 [![Versión 0.1.1](https://img.shields.io/badge/versi%C3%B3n-0.1.1-informational.svg)](CHANGELOG.md)
 
-![Demo: egreso de caja con confirmación por PIN](docs/demo/demo.gif)
+![Demo: egreso de caja con confirmación por credencial](docs/demo/demo.gif)
 
-La demo cuenta una idea: el modelo propone, pero no escribe ni pone montos; la persona decide. Una frase llega a la `ConfirmationCard` con el monto calculado por el servidor MCP, un supervisor confirma con su PIN (step-up, que viaja de la pantalla al servidor sin pasar por el modelo) y recién ahí se escribe en el ERP. Cada garantía del cierre se verifica en runtime. Corre offline con un LLM guionado: `npm run demo`.
+La demo cuenta una idea: el modelo propone, pero no escribe ni pone montos; la persona decide. Una frase llega a la `ConfirmationCard` con el monto calculado por el servidor MCP, un supervisor confirma con su credencial (step-up, que viaja de la pantalla al servidor sin pasar por el modelo) y recién ahí se escribe en el ERP. Cada garantía del cierre se verifica en runtime. Corre offline con un LLM guionado: `npm run demo`.
 
 ## Por qué existe
 
-Un agente que lee tu ERP es fácil; uno en el que se pueda confiar para mover dinero, no. Los principios de [ADR-001](docs/adr/ADR-001-principios.md) lo resuelven con mecanismos y pruebas, no con confianza en el modelo: las escrituras se parten en `preparar_*` y `confirmar_*` y solo la persona confirma, los montos los pone el servidor, el modelo nunca ve el token ni el PIN, y toda corrida termina en una directiva final. Con [ADR-002](docs/adr/ADR-002-un-orquestador.md), la cobertura de un ERP completo sale de un orquestador con agentes de dominio acotados, no de un enjambre que se delega trabajo entre sí.
+Un agente que lee tu ERP es fácil; uno en el que se pueda confiar para mover dinero, no. Los principios de [ADR-001](docs/adr/ADR-001-principios.md) lo resuelven con mecanismos y pruebas, no con confianza en el modelo: las escrituras se parten en `preparar_*` y `confirmar_*` y solo la persona confirma, los montos los pone el servidor, el modelo nunca ve el token ni la credencial de confirmación, y toda corrida termina en una directiva final. Con [ADR-002](docs/adr/ADR-002-un-orquestador.md), la cobertura de un ERP completo sale de un orquestador con agentes de dominio acotados, no de un enjambre que se delega trabajo entre sí.
 
-*English summary:* a TypeScript framework to add an agent layer on top of any ERP exposed through MCP. One orchestrator with scoped agents (at most 15 tools each, never a swarm), a hybrid rules+LLM router, and a hard propose/confirm split: the model only calls `preparar_*` tools, the server computes every amount, confirmation tokens and PINs never reach the model, and every run ends in `render_ui`, `clarify` or `report_error`. Supervisor step-up (PIN and reason) travels from the screen to the server, never through the model. Ships with a synthetic ERP (sales, stock, purchases, cash), a terminal demo (`npm run demo`, offline, scripted LLM), a golden eval set (31 phrases) that runs offline with a scripted LLM and can also run against a real model with a spend cap, and security tests. Status: v0.1.1, MIT. Docs are in Spanish.
+*English summary:* a TypeScript framework to add an agent layer on top of any ERP exposed through MCP. One orchestrator with scoped agents (at most 15 tools each, never a swarm), a hybrid rules+LLM router, and a hard propose/confirm split: the model only calls `preparar_*` tools, the server computes every amount, confirmation tokens and supervisor credentials never reach the model, and every run ends in `render_ui`, `clarify` or `report_error`. Supervisor step-up (credential and reason) travels from the screen to the server, never through the model. Ships with a synthetic ERP (sales, stock, purchases, cash), a terminal demo (`npm run demo`, offline, scripted LLM), a golden eval set (31 phrases) that runs offline with a scripted LLM and can also run against a real model with a spend cap, and security tests. Status: v0.1.1, MIT. Docs are in Spanish.
 
 ## Qué resuelve
 
@@ -27,7 +27,7 @@ Un agente que lee tu ERP es fácil. Uno en el que podés confiar para que prepar
 |---|---|
 | El agente propone, la pantalla muestra, la persona confirma | Las escrituras son pares `preparar_*` / `confirmar_*`. Solo el `Confirmador` llama a `confirmar_*`, y solo ante un `ui.action` de la persona. |
 | El servidor pone los montos | El `Compositor` hidrata importes desde la salida de las tools y descarta lo que el modelo escriba en esos campos (`x-source`) o diga con cifras. |
-| El modelo nunca ve el token ni el PIN | El token vive en el `ProposalStore`; al modelo le llega una vista sin secretos. El PIN va de la pantalla al servidor y no entra en las trazas. |
+| El modelo nunca ve el token ni la credencial de confirmación | El token vive en el `ProposalStore`; al modelo le llega una vista sin secretos. La credencial de confirmación va de la pantalla al servidor y no entra en las trazas. |
 | Un orquestador, no un enjambre | Agentes de dominio con ≤15 tools que no se hablan entre sí (ver [ADR-002](docs/adr/ADR-002-un-orquestador.md)). |
 | Router híbrido | Reglas en español primero; si no alcanzan, el modelo clasifica por llamada a función; si nada clasifica, se le pregunta a la persona. |
 | Nunca queda en el aire | Toda corrida termina en `render_ui`, `clarify` o `report_error`, incluso si el modelo cae o se agota el presupuesto. |
@@ -60,7 +60,7 @@ flowchart TB
     H -->|MCP| E[(Servidor MCP del ERP<br/>fuente de verdad)]
     A -->|directiva final| C[Compositor<br/>hidrata montos desde el servidor]
     C -->|ui.render validado| S
-    S -->|confirmar + token + PIN opcional| F[Confirmador]
+    S -->|confirmar + token + credencial opcional| F[Confirmador]
     F -->|confirmar_*| H
     PS[(ProposalStore<br/>token solo acá)] --- C
     PS --- F
@@ -74,7 +74,7 @@ El modelo ve únicamente el camino superior. La flecha de confirmación sale de 
 packages/
   core/          router, AgentRunner, ProposalStore, Compositor, Confirmador, Orquestador, memoria, permisos, trazas
   llm/           interfaz, ScriptedProvider, presupuesto de gasto, adaptador de ejemplo (variables de entorno)
-  mcp-contract/  tipos, JSON Schema, verificación de conformidad, kit de servidor (token, idempotencia, PIN) y CONTRACT.md
+  mcp-contract/  tipos, JSON Schema, verificación de conformidad, kit de servidor (token, idempotencia, credencial) y CONTRACT.md
   mcp-client/    cliente MCP (stdio, HTTP, en memoria) y cliente compuesto
 contracts/genui/ componentes genéricos versionados (JSON Schema)
 examples/erp-sintetico/  ERP determinista (ventas, stock, compras, caja) + 4 agentes + reglas del router
@@ -90,7 +90,7 @@ Requiere Node 22 o superior.
 ```bash
 npm install
 npm run check        # typecheck + tests + evals
-npm run demo         # egreso de caja con PIN de supervisor, offline
+npm run demo         # egreso de caja con credencial de supervisor, offline
 npm run eval         # 31 frases con ScriptedProvider, sin red ni claves
 npm run ejemplo:servidor   # el ERP sintético como servidor MCP por stdio
 ```
@@ -128,11 +128,11 @@ Una superficie que declara el protocolo 1.1 puede mandar `user.input` con `coman
 
 ## Step-up
 
-Una propuesta puede exigir más que el toque de la persona: `motivo` (texto obligatorio), `supervisor` (usuario y PIN de otra persona con rol superior) o `supervisor_y_motivo`. La `ConfirmationCard` declara qué pide (`step_up`), el PIN y el motivo viajan de la pantalla al servidor dentro de `confirmar_*` (`autorizacion`) y el PIN no entra al modelo ni a las trazas. `@agentic-erp/mcp-contract` incluye un `hashPin`/`verificarPin` de referencia (scrypt) para el servidor. Ver [`CONTRACT.md`](packages/mcp-contract/CONTRACT.md).
+Una propuesta puede exigir más que el toque de la persona: `motivo` (texto obligatorio), `supervisor` (usuario y credencial de otra persona con rol superior) o `supervisor_y_motivo`. La `ConfirmationCard` declara qué pide (`step_up`), la credencial y el motivo viajan de la pantalla al servidor dentro de `confirmar_*` (`autorizacion`) y la credencial de confirmación no entra al modelo ni a las trazas. `@agentic-erp/mcp-contract` incluye una verificación de credenciales de referencia (scrypt) para el servidor. Ver [`CONTRACT.md`](packages/mcp-contract/CONTRACT.md).
 
 ## Auditoría
 
-Cada intención deja una traza JSONL (`Trace`): router, agente, tools, propuestas y confirmación, con los secretos redactados. La demo imprime cuántos eventos registró y verifica que ni el token ni el PIN aparezcan en ella. Extracto real de una corrida (recortado a 5 de los 10 eventos, sin editar valores):
+Cada intención deja una traza JSONL (`Trace`): router, agente, tools, propuestas y confirmación, con los secretos redactados. La demo imprime cuántos eventos registró y verifica que ni el token ni la credencial de confirmación aparezcan en ella. Extracto real de una corrida (recortado a 5 de los 10 eventos, sin editar valores):
 
 ```jsonl
 {"ts":"2026-11-16T15:12:47.805Z","trace_id":"tr_4ee8d42b","intent_id":"int_7ge5re10g87p","evento":"tool_llamada","agente":"caja","tool":"preparar_movimiento_caja","args":{"tipo":"egreso","concepto":"Limpieza","importe":"85"}}
@@ -142,12 +142,12 @@ Cada intención deja una traza JSONL (`Trace`): router, agente, tools, propuesta
 {"ts":"2026-11-16T15:12:47.896Z","trace_id":"tr_4ee8d42b","intent_id":"int_7ge5re10g87p","evento":"confirmacion_aplicada","proposal_id":"prop_0001","tool":"confirmar_movimiento_caja","idempotente":false}
 ```
 
-Tres trazas completas (camino feliz, PIN incorrecto y reintento) en [`docs/ejemplos/auditoria.md`](docs/ejemplos/auditoria.md); se regeneran con `npm run ejemplo:auditoria`.
+Tres trazas completas (camino feliz, credencial incorrecta y reintento) en [`docs/ejemplos/auditoria.md`](docs/ejemplos/auditoria.md); se regeneran con `npm run ejemplo:auditoria`.
 
 ## Pruebas
 
 - Pruebas unitarias y de integración por paquete.
-- `tests/seguridad.test.ts`: el modelo nunca recibe token ni PIN (ni el nombre del campo), los montos salen del servidor, el modelo no puede confirmar, y el token y el PIN no quedan en las trazas.
+- `tests/seguridad.test.ts`: el modelo nunca recibe token ni credencial de confirmación (ni el nombre del campo), los montos salen del servidor, el modelo no puede confirmar, y el token y la credencial de confirmación no quedan en las trazas.
 - Evals dorados: 31 frases con plan del router, tools usadas y componente esperado; corren offline y son parte de `npm run check`.
 
 ## Resultados de evals

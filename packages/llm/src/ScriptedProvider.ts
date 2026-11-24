@@ -14,7 +14,7 @@ export function llamada(name: string, args: Record<string, unknown>, id?: string
 
 /**
  * Proveedor para pruebas: reproduce un guion de respuestas en orden y REGISTRA cada petición
- * que recibe (copia profunda), para poder afirmar que el modelo nunca vio un token, un PIN
+ * que recibe (copia profunda), para poder afirmar que el modelo nunca vio un token, una credencial de confirmación
  * o un monto que no debía ver.
  */
 export class ScriptedProvider implements LlmProvider {

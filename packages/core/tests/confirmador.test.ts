@@ -97,10 +97,10 @@ describe('Confirmador', () => {
     expect(b.store.get(p.id)?.estado).toBe('abierta');
     expect(b.cliente.llamadas.filter((l) => l.nombre === 'confirmar_cosa')).toHaveLength(0);
 
-    b.cliente.alConfirmar = (args) => ((args['autorizacion'] as { pin: string }).pin === '0000' ? { ok: false, datos: { codigo: 'AUTORIZACION_INVALIDA', mensaje: 'PIN incorrecto.' } } : { ok: true, datos: { estado: 'confirmado', idempotente: false, resultado: {}, mensaje: 'Hecho.' } });
+    b.cliente.alConfirmar = (args) => ((args['autorizacion'] as { pin: string }).pin === '0000' ? { ok: false, datos: { codigo: 'AUTORIZACION_INVALIDA', mensaje: 'credencial incorrecta.' } } : { ok: true, datos: { estado: 'confirmado', idempotente: false, resultado: {}, mensaje: 'Hecho.' } });
     const mal = await b.confirmador.confirmar({ proposalId: p.id, tokenSuperficie: p.token, autorizacion: { usuario: 'sup', pin: '0000' } }, CTX, 'tr1');
     expect(mal).toMatchObject({ ok: false, codigo: 'AUTORIZACION_INVALIDA' });
-    expect(b.store.get(p.id)?.estado).toBe('abierta'); // se puede reintentar con el PIN correcto
+    expect(b.store.get(p.id)?.estado).toBe('abierta'); // se puede reintentar con la credencial correcta
     const bien = await b.confirmador.confirmar({ proposalId: p.id, tokenSuperficie: p.token, autorizacion: { usuario: 'sup', pin: '1357' } }, CTX, 'tr1');
     expect(bien).toMatchObject({ ok: true });
   });
@@ -119,7 +119,7 @@ describe('Confirmador', () => {
     expect(b.store.get(p.id)?.estado).toBe('abandonada');
   });
 
-  it('la traza no contiene el token ni el PIN', async () => {
+  it('la traza no contiene el token ni la credencial de confirmación', async () => {
     const b = await armar();
     b.cliente.requiereStepUp = true;
     const p = await b.preparar();
@@ -143,12 +143,12 @@ describe('Confirmador', () => {
       expect(await conf(b, p, { motivo: '   ' })).toMatchObject({ ok: false, codigo: 'STEP_UP_REQUERIDO' });
       expect(aConfirmar(b)).toHaveLength(0);
       expect(b.store.get(p.id)?.estado).toBe('abierta');
-      // un PIN que la pantalla mande de más no sale de acá: el nivel no lo pide
+      // una credencial que la pantalla mande de más no sale de acá: el nivel no lo pide
       expect(await conf(b, p, { usuario: 'sup', pin: '1357', motivo: ' Cierre de mes ' })).toMatchObject({ ok: true });
       expect(aConfirmar(b)[0]?.args['autorizacion']).toEqual({ motivo: 'Cierre de mes' });
     });
 
-    it('supervisor: pide usuario y PIN juntos; el motivo que sobre no viaja', async () => {
+    it('supervisor: pide usuario y credencial juntos; el motivo que sobre no viaja', async () => {
       const b = await armar();
       b.cliente.stepUp = 'supervisor';
       const p = await b.preparar();
@@ -190,7 +190,7 @@ describe('Confirmador', () => {
       expect(await conf(c, q, { motivo: 'solo motivo' })).toMatchObject({ ok: false, mensaje: expect.stringContaining('responsable') });
     });
 
-    it('la traza guarda el motivo pero nunca el PIN', async () => {
+    it('la traza guarda el motivo pero nunca la credencial de confirmación', async () => {
       const b = await armar();
       b.cliente.stepUp = 'supervisor_y_motivo';
       const p = await b.preparar();

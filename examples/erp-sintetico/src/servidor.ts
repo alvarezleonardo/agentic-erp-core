@@ -37,7 +37,7 @@ const confirmarEsquema = (): Obj =>
       autorizacion: {
         type: 'object',
         additionalProperties: false,
-        description: 'Step-up: usuario y PIN de un supervisor y/o el motivo, según lo que pida la propuesta.',
+        description: 'Step-up: usuario y credencial de un supervisor y/o el motivo, según lo que pida la propuesta.',
         properties: { usuario: { type: 'string' }, pin: { type: 'string' }, motivo: { type: 'string', maxLength: 200 } },
       },
     },

@@ -2,11 +2,11 @@
 
 Cada intención deja una traza JSONL (`Trace`, ver [`packages/core/src/trace.ts`](../../packages/core/src/trace.ts)): una línea por evento, con los secretos redactados. Acá hay tres corridas completas con el ERP sintético (v0.1.1, 24/11/2026), con el modelo guionado y sin editar ningún valor. Los `ts` y los ids son aleatorios y cambian en cada corrida.
 
-Para reproducirlas: `npm run ejemplo:auditoria` (código en [`examples/erp-sintetico/src/auditoria.ts`](../../examples/erp-sintetico/src/auditoria.ts)). La política es la de la demo: los egresos desde 50,00 piden PIN de un supervisor. La frase en los tres casos es `registrá un egreso de caja de 85 por limpieza`.
+Para reproducirlas: `npm run ejemplo:auditoria` (código en [`examples/erp-sintetico/src/auditoria.ts`](../../examples/erp-sintetico/src/auditoria.ts)). La política es la de la demo: los egresos desde 50,00 piden la confirmación de un supervisor. La frase en los tres casos es `registrá un egreso de caja de 85 por limpieza`.
 
 ## 1. Camino feliz
 
-El modelo propone el egreso, el servidor arma la tarjeta, el supervisor confirma con su PIN y se escribe un movimiento en el ERP.
+El modelo propone el egreso, el servidor arma la tarjeta, supervisor1 confirma y se escribe un movimiento en el ERP.
 
 ```jsonl
 {"ts":"2026-11-24T12:37:22.393Z","trace_id":"tr_171c0e75","intent_id":"int_232xg64vvaw7","evento":"intencion_inicio","texto":"registrá un egreso de caja de 85 por limpieza","rol":"operador"}
@@ -25,12 +25,12 @@ Qué se lee en la traza:
 
 - `tool_llamada`: los `args` que mandó el modelo son `tipo`, `concepto` e `importe` como los dijo la persona. El total que ve el supervisor lo calcula el servidor; no está en lo que pidió el modelo.
 - `directiva_final` con `fuente: "prop_0001"` y `valida: true`: la tarjeta se renderizó a partir de la propuesta guardada, no de lo que escribió el modelo.
-- `confirmacion_enviada` con `step_up: "supervisor"` y `con_autorizacion: true`: la confirmación llegó con credencial de supervisor. El PIN en sí no figura.
+- `confirmacion_enviada` con `step_up: "supervisor"` y `con_autorizacion: true`: la confirmación llegó con credencial de supervisor, que no figura en la traza.
 - `confirmacion_aplicada` con `idempotente: false`: es la primera escritura. Movimientos nuevos en el ERP: 1.
 
-## 2. PIN incorrecto
+## 2. Autorización inválida
 
-Misma propuesta, pero el supervisor confirma con un PIN equivocado. El servidor rechaza, no se escribe nada.
+Misma propuesta, pero el supervisor confirma con una autorización inválida. El servidor rechaza, no se escribe nada.
 
 ```jsonl
 {"ts":"2026-11-24T12:37:22.472Z","trace_id":"tr_8286cb0b","intent_id":"int_h1bw0j56v16y","evento":"intencion_inicio","texto":"registrá un egreso de caja de 85 por limpieza","rol":"operador"}
@@ -49,7 +49,7 @@ Qué se lee en la traza:
 
 - Los primeros 9 eventos son idénticos al caso feliz: hasta la tarjeta no hay diferencia.
 - `confirmacion_rechazada` con `codigo: "AUTORIZACION_INVALIDA"` y `origen: "servidor"`: el rechazo lo decide el servidor MCP, no el orquestador. No hay `confirmacion_aplicada`.
-- Movimientos nuevos en el ERP: 0. La persona ve un aviso ("Usuario o PIN de autorización incorrectos.").
+- Movimientos nuevos en el ERP: 0. La persona ve un aviso ("Usuario o credencial de autorización incorrectos.").
 
 ## 3. Reintento con la misma `idempotency_key`
 
@@ -77,6 +77,6 @@ Qué se lee en la traza:
 
 ## Qué no está en la traza
 
-En las tres corridas se verificó con código (no a ojo) que ni el `confirmation_token` ni el PIN aparecen en la traza completa. El PIN se busca como valor JSON entre comillas, porque los ids aleatorios podrían contener esos mismos dígitos por casualidad. En la corrida del PIN incorrecto se buscó el `0000` que se envió. Resultado: `sinSecretos: true` en las tres.
+En las tres corridas se verificó con código (no a ojo) que ni el `confirmation_token` ni la autorización del supervisor aparecen en la traza completa. La credencial enviada se busca como valor JSON entre comillas, porque los ids aleatorios podrían contener esos mismos dígitos por casualidad. En la corrida de la autorización inválida se buscó la credencial que se envió. Resultado: `sinSecretos: true` en las tres.
 
 Vuelta al [README](../../README.md#auditoría).

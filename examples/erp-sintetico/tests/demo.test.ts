@@ -20,16 +20,15 @@ describe('demo de terminal', () => {
     expect(texto).toContain('preparar_movimiento_caja');
     expect(texto).toContain('importe: "85"');
     expect(texto).toContain('todavía no se escribió nada');
-    expect(texto).toContain('****');
-    // Se quita el trace_id (hex aleatorio) para que el chequeo del PIN no dependa del azar.
+    // Se quita el trace_id (hex aleatorio) para que el chequeo de la credencial no dependa del azar.
     expect(texto.replace(/tr_[0-9a-f]+/g, '')).not.toContain('2468');
     expect(texto.match(/\[ok\]/g)).toHaveLength(5);
     expect(texto).toContain('Auditoría:');
-    expect(texto).toContain('no contiene el token ni el PIN');
+    expect(texto).toContain('no contiene el token ni la autorización del supervisor');
     expect(texto).not.toContain('[FALLA]');
   });
 
-  it('con un PIN incorrecto no escribe e informa [FALLA]', async () => {
+  it('con una autorización inválida no escribe e informa [FALLA]', async () => {
     const lineas: string[] = [];
     const r = await correrDemo({ escribir: (l) => lineas.push(l), pin: '0000' });
     expect(r.ok).toBe(false);

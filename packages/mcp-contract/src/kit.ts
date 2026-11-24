@@ -45,8 +45,8 @@ export function claveIdempotencia(contexto: Pick<ContextoSesion, 'tenant' | 'usu
 const CLAVE_SECRETA = /token|secret|password|(?:^|_)pin(?:$|_)|^idempotency_key$|^contexto$/i;
 
 /**
- * Hash de la entrada de una operación idempotente, SIN los secretos (token, PIN) ni la clave misma ni el contexto:
- * un PIN de pocos dígitos se recuperaría por fuerza bruta desde un hash guardado.
+ * Hash de la entrada de una operación idempotente, SIN los secretos (token, credencial) ni la clave misma ni el contexto:
+ * una credencial corta se recuperaría por fuerza bruta desde un hash guardado.
  */
 export function hashEntrada(entrada: Obj): string {
   const limpiar = (v: unknown): unknown => {

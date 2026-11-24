@@ -75,7 +75,7 @@ export function stepUpDe(propuesta: Pick<Propuesta, 'step_up' | 'requiere_step_u
   return normalizarStepUp(propuesta['step_up']) ?? normalizarStepUp(propuesta['requiere_step_up']) ?? 'none';
 }
 
-/** ¿El nivel pide usuario y PIN de un supervisor? */
+/** ¿El nivel pide usuario y credencial de un supervisor? */
 export const pideSupervisor = (s: StepUp): boolean => s === 'supervisor' || s === 'supervisor_y_motivo';
 
 /** ¿El nivel pide un motivo escrito? */
@@ -89,13 +89,13 @@ export interface FaltanteStepUp {
 
 /**
  * Qué le falta a una autorización para cumplir el nivel pedido (undefined si está completa). Solo mira presencia y
- * forma: quién puede autorizar y si el PIN es correcto lo decide el servidor.
+ * forma: quién puede autorizar y si la credencial es correcta lo decide el servidor.
  */
 export function faltanteDeStepUp(nivel: StepUp, autorizacion: Autorizacion | undefined): FaltanteStepUp | undefined {
   const sinSupervisor = pideSupervisor(nivel) && !(autorizacion?.usuario?.trim() && autorizacion.pin);
   const sinMotivo = pideMotivo(nivel) && !autorizacion?.motivo?.trim();
-  if (sinSupervisor && sinMotivo) return { mensaje: 'Esta operación necesita la autorización de un responsable y un motivo.', accion_sugerida: 'Ingresá usuario y PIN de quien autoriza y escribí el motivo.' };
-  if (sinSupervisor) return { mensaje: 'Esta operación necesita la autorización de un responsable.', accion_sugerida: 'Ingresá usuario y PIN de quien autoriza.' };
+  if (sinSupervisor && sinMotivo) return { mensaje: 'Esta operación necesita la autorización de un responsable y un motivo.', accion_sugerida: 'Ingresá usuario y credencial de quien autoriza y escribí el motivo.' };
+  if (sinSupervisor) return { mensaje: 'Esta operación necesita la autorización de un responsable.', accion_sugerida: 'Ingresá usuario y credencial de quien autoriza.' };
   if (sinMotivo) return { mensaje: 'Esta operación necesita que indiques el motivo.', accion_sugerida: 'Escribí el motivo.' };
   return undefined;
 }

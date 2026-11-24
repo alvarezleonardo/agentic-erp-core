@@ -73,7 +73,7 @@ describe('proponer y confirmar sobre el ERP real (en memoria)', () => {
     }
   });
 
-  it('un egreso grande exige un supervisor: sin PIN no pasa, con PIN incorrecto tampoco, con el correcto sí', async () => {
+  it('un egreso grande exige un supervisor: sin credencial no pasa, con credencial incorrecta tampoco, con la correcta sí', async () => {
     const llm = new ScriptedProvider([llamada('preparar_movimiento_caja', { tipo: 'egreso', concepto: 'Pago de flete', importe: '800' }), finalConFuente('ConfirmationCard')]);
     const d = await crearDespliegue({ llm });
     try {
@@ -153,7 +153,7 @@ describe('proponer y confirmar sobre el ERP real (en memoria)', () => {
     await expect(erp.confirmar('movimiento_caja', args(egr, propio), contextoDe('supervisor', 'supervisor1'))).rejects.toMatchObject({ codigo: 'AUTORIZACION_INVALIDA' });
   });
 
-  it('confirmar usa el kit de idempotencia: misma clave repite sin duplicar, otra clave o otra entrada se rechaza, y un PIN incorrecto no consume la clave', async () => {
+  it('confirmar usa el kit de idempotencia: misma clave repite sin duplicar, otra clave o otra entrada se rechaza, y una credencial incorrecta no consume la clave', async () => {
     const erp = new ErpSintetico({ autorizadores: { supervisor1: { pin: PIN_SUPERVISOR_DE_PRUEBA, rol: 'supervisor' } } });
     const op = contextoDe('operador');
     const p = erp.prepararMovimientoCaja({ tipo: 'egreso', concepto: 'Pago de flete', importe: '800' }, op);
@@ -166,7 +166,7 @@ describe('proponer y confirmar sobre el ERP real (en memoria)', () => {
     const repetida = await erp.confirmar('movimiento_caja', args(bien), op);
     expect(repetida).toMatchObject({ idempotente: true, resultado: primera.resultado });
     expect(erp.listarMovimientosCaja(HOY).filas.filter((f) => f['concepto'] === 'Pago de flete')).toHaveLength(1);
-    // el PIN no entra al hash: repetir con otro PIN sigue siendo la misma entrada
+    // la credencial de confirmación no entra al hash: repetir con otra credencial sigue siendo la misma entrada
     expect(await erp.confirmar('movimiento_caja', args({ autorizacion: { usuario: 'supervisor1', pin: 'otro' } }), op)).toMatchObject({ idempotente: true });
     await expect(erp.confirmar('movimiento_caja', args({ autorizacion: { usuario: 'otro_usuario', pin: '1' } }), op)).rejects.toMatchObject({ codigo: 'PARAMETRO_INVALIDO' });
     await expect(erp.confirmar('movimiento_caja', args(bien, 'idk_kit_0002'), op)).rejects.toMatchObject({ codigo: 'PROPUESTA_YA_CONFIRMADA' });

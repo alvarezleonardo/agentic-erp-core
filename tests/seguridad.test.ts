@@ -19,8 +19,8 @@ async function escenario(finalDelModelo: PasoGuion) {
   return { llm, d, s, sobres, tarjeta, data: tarjeta['data'] as Obj };
 }
 
-describe('seguridad: el modelo nunca ve el token ni el PIN', () => {
-  it('ni el token, ni su nombre de campo, ni el PIN aparecen en nada de lo que se le mandó al modelo', async () => {
+describe('seguridad: el modelo nunca ve el token ni la credencial de confirmación', () => {
+  it('ni el token, ni su nombre de campo, ni la credencial de confirmación aparecen en nada de lo que se le mandó al modelo', async () => {
     const { llm, d, s, tarjeta, data } = await escenario(final());
     try {
       const token = String(data['confirmation_token']);
@@ -40,7 +40,7 @@ describe('seguridad: el modelo nunca ve el token ni el PIN', () => {
     }
   });
 
-  it('ni el token ni el PIN quedan en las trazas', async () => {
+  it('ni el token ni la credencial de confirmación quedan en las trazas', async () => {
     const { d, s, tarjeta, data } = await escenario(final());
     try {
       const token = String(data['confirmation_token']);
@@ -54,7 +54,7 @@ describe('seguridad: el modelo nunca ve el token ni el PIN', () => {
     }
   });
 
-  it('step-up con motivo: el PIN y el motivo van de la pantalla al servidor; el modelo no ve ninguno y la traza guarda el motivo pero no el PIN', async () => {
+  it('step-up con motivo: la credencial y el motivo van de la pantalla al servidor; el modelo no ve ninguno y la traza guarda el motivo pero no la credencial de confirmación', async () => {
     const llm = new ScriptedProvider([llamada('preparar_movimiento_caja', { tipo: 'egreso', concepto: 'Equipos nuevos', importe: '2500' }), final()]);
     const d = await crearDespliegue({ llm });
     try {

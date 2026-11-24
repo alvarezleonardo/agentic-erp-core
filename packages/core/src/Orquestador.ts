@@ -309,7 +309,7 @@ export class Sesion {
       const total = esObjeto(r.datos['resultado']) ? r.datos['resultado']['total'] : undefined;
       return [this.compositor.sobreDismiss(c.intentId, c.traceId, c.agente, 'ConfirmationCard'), this.compositor.sobreToast(ctx, 'exito', r.mensaje, total)];
     }
-    // Sin autorización o con PIN incorrecto la propuesta sigue abierta: es un aviso, no un cierre.
+    // Sin autorización o con credencial incorrecta la propuesta sigue abierta: es un aviso, no un cierre.
     return [this.compositor.sobreToast(ctx, r.codigo === 'TOKEN_INVALIDO' ? 'error' : 'aviso', r.mensaje)];
   }
 
@@ -344,7 +344,7 @@ export class Sesion {
   }
 }
 
-/** Lo que mandó la pantalla en `confirmation.step_up`: usuario y PIN de quien autoriza y/o el motivo. */
+/** Lo que mandó la pantalla en `confirmation.step_up`: usuario y credencial de quien autoriza y/o el motivo. */
 const autorizacionDe = (step: Obj): Autorizacion => ({
   ...(typeof step['usuario'] === 'string' ? { usuario: step['usuario'] } : {}),
   ...(typeof step['pin'] === 'string' ? { pin: step['pin'] } : {}),
