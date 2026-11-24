@@ -193,6 +193,32 @@ export const TOOLS: DefTool[] = [
     manejar: (a, c, erp) => ({ ...erp.prepararNotaCredito(a, c) }),
   },
   { nombre: 'confirmar_nota_credito', descripcion: 'Confirma una nota de crédito preparada. Lo llama el orquestador tras el toque de la persona.', esquema: confirmarEsquema(), manejar: async (a, c, erp) => ({ ...(await erp.confirmar('nota_credito', a, c)) }) },
+  // ---- clientes y cobranzas
+  {
+    nombre: 'estado_cuenta_cliente',
+    descripcion: 'Estado de cuenta de un cliente: saldo pendiente, vencido y a vencer, límite de crédito y crédito disponible, y cada factura con saldo. Pide el cliente_id que devuelve buscar_clientes.',
+    esquema: entrada({ cliente_id: { type: 'string' } }, ['cliente_id']),
+    manejar: (a, _c, erp) => ({ ...erp.estadoCuentaCliente(a) }),
+  },
+  {
+    nombre: 'listar_deudores',
+    descripcion: 'Clientes con saldo vencido, con su deuda repartida por antigüedad de la factura desde su emisión (0-30, 31-60, 61-90 y más de 90 días). Con antiguedad_minima cuenta solo las facturas vencidas de más de esos días. Se ordena por saldo vencido (por defecto), antigüedad o nombre.',
+    esquema: entrada({ antiguedad_minima: { type: 'integer', minimum: 0, description: 'Días de antigüedad desde la emisión; trae solo la deuda vencida de más de esos días.' }, orden: { enum: ['saldo_vencido', 'antiguedad', 'nombre'] }, limite: { type: 'integer', minimum: 1, maximum: 50 } }),
+    manejar: (a, _c, erp) => ({ ...erp.listarDeudores(a) }),
+  },
+  {
+    nombre: 'listar_cobranzas',
+    descripcion: 'Cobros registrados, filtrados por cliente y período, con medio, importe y cantidad de facturas imputadas.',
+    esquema: entrada({ cliente_id: { type: 'string' }, desde: FECHA, hasta: FECHA }),
+    manejar: (a, _c, erp) => ({ ...erp.listarCobranzas(a) }),
+  },
+  {
+    nombre: 'preparar_cobranza',
+    descripcion: 'Prepara el cobro de un cliente con su medio (efectivo, transferencia o cheque) e importe. El servidor lo reparte entre las facturas con saldo, de la más vieja a la más nueva, y calcula lo que queda; rechaza importes mayores a la deuda. Si es en efectivo, al confirmar también ingresa a la caja. Los cobros grandes necesitan la confirmación de un supervisor. No se registra hasta que la persona confirma.',
+    esquema: entrada({ cliente_id: { type: 'string' }, medio: { enum: ['efectivo', 'transferencia', 'cheque'] }, importe: { type: ['string', 'number'], description: 'Importe tal como lo dijo la persona, sin símbolo de moneda.' } }, ['cliente_id', 'medio', 'importe']),
+    manejar: (a, c, erp) => ({ ...erp.prepararCobranza(a, c) }),
+  },
+  { nombre: 'confirmar_cobranza', descripcion: 'Confirma una cobranza preparada. Lo llama el orquestador tras el toque de la persona.', esquema: confirmarEsquema(), manejar: async (a, c, erp) => ({ ...(await erp.confirmar('cobranza', a, c)) }) },
 ];
 
 export const toolsMcp = (): ToolMcp[] => TOOLS.map((t) => ({ nombre: t.nombre, descripcion: t.descripcion, esquema: t.esquema }));

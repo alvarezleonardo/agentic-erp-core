@@ -103,6 +103,31 @@ export interface Factura {
   estado: EstadoFactura;
 }
 
+export type MedioCobro = 'efectivo' | 'transferencia' | 'cheque';
+
+/** Parte de un cobro aplicada a una factura. */
+export interface ImputacionCobro {
+  factura_id: string;
+  /** Centavos. */
+  importe: number;
+}
+
+/**
+ * Cobro registrado a un cliente. Se imputa a las facturas con saldo, de la más vieja a la más nueva. Los cobros
+ * anteriores a este registro no tienen detalle: quedan solo en el `cobrado` de cada factura.
+ */
+export interface Cobranza {
+  id: string;
+  /** Número de recibo, por ejemplo 0001-00000001. */
+  numero: string;
+  cliente_id: string;
+  fecha: string;
+  medio: MedioCobro;
+  /** Centavos. */
+  importe: number;
+  imputaciones: ImputacionCobro[];
+}
+
 export interface NotaCredito {
   id: string;
   numero: string;
@@ -136,6 +161,8 @@ export interface DatosErp {
   clientes: Cliente[];
   facturas: Factura[];
   notasCredito: NotaCredito[];
+  /** Cobros registrados con el ERP. Arranca vacío: los cobros previos están en `Factura.cobrado`. */
+  cobranzas: Cobranza[];
 }
 
 /** Generador pseudoaleatorio determinista (mulberry32). */
@@ -230,7 +257,7 @@ export function generarDatos(): DatosErp {
     apertura = contado;
   }
 
-  return { proveedores: PROVEEDORES.map((p) => ({ ...p })), articulos, ventas, ordenes, movimientos, arqueos, ...generarFacturacion() };
+  return { proveedores: PROVEEDORES.map((p) => ({ ...p })), articulos, ventas, ordenes, movimientos, arqueos, ...generarFacturacion(), cobranzas: [] };
 }
 
 // ---------------------------------------------------------------------------------------------------------- facturación
@@ -240,6 +267,8 @@ export function generarDatos(): DatosErp {
  * - Dos homónimos, «Gómez Hnos.» (cuenta corriente) y «Gómez, Laura» (contado): «Gómez» a secas es ambiguo.
  * - «Colegio San Martín» (cli_05) no paga nunca: todas sus facturas quedan vencidas.
  * - «Distribuidora Norte SRL» (cli_07) tiene un límite de crédito bajo y lo supera con lo que debe (el único cliente que lo supera).
+ * Cobranzas reutiliza estos mismos clientes y facturas: no tiene entidades propias salvo el cobro (`Cobranza`). Con estos datos,
+ * solo cli_05 y cli_07 tienen facturas vencidas de más de 60 días de antigüedad (contada desde la emisión).
  */
 const CLIENTES: Cliente[] = [
   { id: 'cli_01', nombre: 'Ferretería del Centro S.A.', condicion_pago: 'cuenta_corriente', limite_credito: 3_000_000, tipo_comprobante: 'A', plazo_dias: 30 },
