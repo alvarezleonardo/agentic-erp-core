@@ -151,6 +151,62 @@ export function estadoDeFactura(f: Pick<Factura, 'importe' | 'cobrado' | 'acredi
   return f.cobrado === 0 ? 'anulada' : 'cobrada';
 }
 
+export type EstadoFacturaProveedor = 'pendiente' | 'parcialmente_pagada' | 'pagada';
+
+/**
+ * Factura de un proveedor (cuenta a pagar). Igual que la factura de venta, el saldo no se guarda: es `importe - pagado`
+ * (ver `saldoDeFacturaProveedor`), así que pagos solo suma a `pagado`. `estado` se mantiene con `estadoDeFacturaProveedor`.
+ */
+export interface FacturaProveedor {
+  id: string;
+  /** Número del comprobante tal como lo emitió el proveedor, por ejemplo 0003-00004388. */
+  numero: string;
+  proveedor_id: string;
+  /** Orden de compra recibida a la que corresponde, si se la puede vincular. */
+  orden_id?: string;
+  fecha: string;
+  vencimiento: string;
+  /** Centavos. */
+  importe: number;
+  /** Centavos pagados hasta hoy. */
+  pagado: number;
+  estado: EstadoFacturaProveedor;
+}
+
+export type MedioPago = 'efectivo' | 'transferencia';
+
+/** `pagado`: salió de la caja. `pendiente_debito`: transferencia ordenada, a la espera del débito bancario (lo cierra el área de tesorería). */
+export type EstadoBancario = 'pagado' | 'pendiente_debito';
+
+/** Parte de un pago aplicada a una factura de proveedor. */
+export interface ImputacionPago {
+  factura_id: string;
+  /** Centavos. */
+  importe: number;
+}
+
+/** Pago registrado a un proveedor, imputado a sus facturas de la que vence primero a la que vence último. */
+export interface PagoProveedor {
+  id: string;
+  /** Número de la orden de pago, por ejemplo OP-0001. */
+  numero: string;
+  proveedor_id: string;
+  fecha: string;
+  medio: MedioPago;
+  /** Centavos. */
+  importe: number;
+  estado_bancario: EstadoBancario;
+  imputaciones: ImputacionPago[];
+}
+
+/** Saldo pendiente de una factura de proveedor, en centavos. */
+export const saldoDeFacturaProveedor = (f: Pick<FacturaProveedor, 'importe' | 'pagado'>): number => f.importe - f.pagado;
+
+export function estadoDeFacturaProveedor(f: Pick<FacturaProveedor, 'importe' | 'pagado'>): EstadoFacturaProveedor {
+  if (saldoDeFacturaProveedor(f) <= 0) return 'pagada';
+  return f.pagado > 0 ? 'parcialmente_pagada' : 'pendiente';
+}
+
 export interface DatosErp {
   proveedores: Proveedor[];
   articulos: Articulo[];
@@ -163,6 +219,10 @@ export interface DatosErp {
   notasCredito: NotaCredito[];
   /** Cobros registrados con el ERP. Arranca vacío: los cobros previos están en `Factura.cobrado`. */
   cobranzas: Cobranza[];
+  /** Cuentas a pagar: facturas de proveedor, con parte ya pagada antes de este registro. */
+  facturasProveedor: FacturaProveedor[];
+  /** Pagos registrados con el ERP. Arranca vacío: los pagos anteriores están en `FacturaProveedor.pagado`. */
+  pagosProveedor: PagoProveedor[];
 }
 
 /** Generador pseudoaleatorio determinista (mulberry32). */
@@ -182,6 +242,9 @@ const PROVEEDORES: Proveedor[] = [
   { id: 'prv_02', nombre: 'Tecnoparts Mayorista', plazo_dias: 10 },
   { id: 'prv_03', nombre: 'Papelera Central', plazo_dias: 5 },
   { id: 'prv_04', nombre: 'Logística Andina', plazo_dias: 14 },
+  // Dos homónimos a propósito (área pagos): «pagale a Gómez» es ambiguo y el agente pregunta, no elige. No proveen artículos.
+  { id: 'prv_05', nombre: 'Gómez Insumos SA', plazo_dias: 15 },
+  { id: 'prv_06', nombre: 'Gómez, Ricardo', plazo_dias: 7 },
 ];
 
 // Importes en centavos. Tres artículos quedan bajo el mínimo a propósito (el 004 y el 007 con stock casi nulo).
@@ -257,7 +320,7 @@ export function generarDatos(): DatosErp {
     apertura = contado;
   }
 
-  return { proveedores: PROVEEDORES.map((p) => ({ ...p })), articulos, ventas, ordenes, movimientos, arqueos, ...generarFacturacion(), cobranzas: [] };
+  return { proveedores: PROVEEDORES.map((p) => ({ ...p })), articulos, ventas, ordenes, movimientos, arqueos, ...generarFacturacion(), cobranzas: [], facturasProveedor: generarFacturasProveedor(ordenes), pagosProveedor: [] };
 }
 
 // ---------------------------------------------------------------------------------------------------------- facturación
@@ -352,3 +415,41 @@ function generarFacturacion(): Pick<DatosErp, 'clientes' | 'facturas' | 'notasCr
 }
 
 export { sumarDias };
+
+
+// ---------------------------------------------------------------------------------------------------- cuentas a pagar
+
+/**
+ * Facturas de proveedor, escritas a mano (no hay generador: los casos tienen que ser exactos). Importes en centavos.
+ * HOY es martes 2026-03-31, así que «esta semana» llega hasta el domingo 2026-04-05. Casos sembrados:
+ * - Dos homónimos, «Gómez Insumos SA» (prv_05, tres facturas) y «Gómez, Ricardo» (prv_06, una): «Gómez» a secas es ambiguo.
+ * - Vencidas: Aurora (fpr_0002), Tecnoparts (fpr_0005), Papelera Central (fpr_0007), Gómez Insumos (fpr_0011) y Ricardo Gómez (fpr_0014).
+ * - Vencen hoy o esta semana: fpr_0008 (hoy), fpr_0012 (01/04), fpr_0003 (02/04, con un pago parcial previo) y fpr_0006 (03/04).
+ * - Fuera de la semana: fpr_0010 (08/04), fpr_0013 (11/04) y fpr_0015 (28/04).
+ * - Vinculadas a una orden de compra recibida: fpr_0001, fpr_0004, fpr_0007 y fpr_0009, por el total de la orden. Tres ya
+ *   están pagadas; la de Papelera Central (fpr_0007) sigue abierta y vencida.
+ * - Anomalía: fpr_0015 repite número e importe de fpr_0005 (Tecnoparts, cargada dos veces); la propuesta de pago lo advierte.
+ * Pagos recibe estas mismas facturas y proveedores: no hay otra entidad salvo el pago (`PagoProveedor`).
+ */
+function generarFacturasProveedor(ordenes: OrdenCompra[]): FacturaProveedor[] {
+  const totalOrden = (id: string): number => (ordenes.find((o) => o.id === id)?.lineas ?? []).reduce((s, l) => s + l.costo_unitario * l.cantidad, 0);
+  type Base = Omit<FacturaProveedor, 'estado'>;
+  const bases: Base[] = [
+    { id: 'fpr_0001', numero: '0003-00004120', proveedor_id: 'prv_01', orden_id: 'oc_0001', fecha: '2026-01-14', vencimiento: '2026-02-13', importe: totalOrden('oc_0001'), pagado: totalOrden('oc_0001') },
+    { id: 'fpr_0002', numero: '0003-00004388', proveedor_id: 'prv_01', fecha: '2026-02-20', vencimiento: '2026-03-22', importe: 96_500, pagado: 0 },
+    { id: 'fpr_0003', numero: '0003-00004471', proveedor_id: 'prv_01', fecha: '2026-03-10', vencimiento: '2026-04-02', importe: 142_000, pagado: 40_000 },
+    { id: 'fpr_0004', numero: '0011-00076544', proveedor_id: 'prv_02', orden_id: 'oc_0002', fecha: '2026-01-28', vencimiento: '2026-02-27', importe: totalOrden('oc_0002'), pagado: totalOrden('oc_0002') },
+    { id: 'fpr_0005', numero: '0011-00077210', proveedor_id: 'prv_02', fecha: '2026-03-02', vencimiento: '2026-03-27', importe: 215_000, pagado: 0 },
+    { id: 'fpr_0006', numero: '0011-00077533', proveedor_id: 'prv_02', fecha: '2026-03-20', vencimiento: '2026-04-03', importe: 86_400, pagado: 0 },
+    { id: 'fpr_0007', numero: '0002-00001907', proveedor_id: 'prv_03', orden_id: 'oc_0003', fecha: '2026-02-11', vencimiento: '2026-03-13', importe: totalOrden('oc_0003'), pagado: 0 },
+    { id: 'fpr_0008', numero: '0002-00002015', proveedor_id: 'prv_03', fecha: '2026-03-16', vencimiento: '2026-03-31', importe: 31_250, pagado: 0 },
+    { id: 'fpr_0009', numero: '0005-00000873', proveedor_id: 'prv_04', orden_id: 'oc_0004', fecha: '2026-02-25', vencimiento: '2026-03-27', importe: totalOrden('oc_0004'), pagado: totalOrden('oc_0004') },
+    { id: 'fpr_0010', numero: '0005-00000961', proveedor_id: 'prv_04', fecha: '2026-03-24', vencimiento: '2026-04-08', importe: 54_000, pagado: 0 },
+    { id: 'fpr_0011', numero: '0007-00000912', proveedor_id: 'prv_05', fecha: '2026-02-26', vencimiento: '2026-03-13', importe: 128_000, pagado: 0 },
+    { id: 'fpr_0012', numero: '0007-00001004', proveedor_id: 'prv_05', fecha: '2026-03-17', vencimiento: '2026-04-01', importe: 94_500, pagado: 0 },
+    { id: 'fpr_0013', numero: '0007-00001057', proveedor_id: 'prv_05', fecha: '2026-03-27', vencimiento: '2026-04-11', importe: 67_800, pagado: 0 },
+    { id: 'fpr_0014', numero: '0001-00000231', proveedor_id: 'prv_06', fecha: '2026-03-18', vencimiento: '2026-03-25', importe: 45_000, pagado: 0 },
+    { id: 'fpr_0015', numero: '0011-00077210', proveedor_id: 'prv_02', fecha: '2026-03-29', vencimiento: '2026-04-28', importe: 215_000, pagado: 0 },
+  ];
+  return bases.map((b) => ({ ...b, estado: estadoDeFacturaProveedor(b) }));
+}

@@ -10,6 +10,7 @@ export const ROLES_POR_ESCRITURA: Readonly<Record<string, readonly string[]>> = 
   preparar_movimiento_caja: ['operador', 'supervisor', 'gerente'],
   preparar_nota_credito: ['operador', 'supervisor', 'gerente'],
   preparar_cobranza: ['operador', 'supervisor', 'gerente'],
+  preparar_pago_proveedor: ['supervisor', 'gerente'],
 };
 
 /** Roles que pueden autorizar un step-up. */
