@@ -21,7 +21,7 @@ Es un monorepo con npm workspaces: `packages/*` (core, llm, mcp-client, mcp-cont
 |---|---|
 | `npm run typecheck` | Chequeo de tipos con `tsc --noEmit` |
 | `npm test` | Tests con Vitest |
-| `npm run eval` | Evals offline: 38 frases doradas con un LLM guionado, sin red ni secretos |
+| `npm run eval` | Evals offline: 73 frases doradas con un LLM guionado, sin red ni secretos |
 | `npm run check` | Los tres anteriores, en ese orden. Es lo que corre el CI |
 | `npm run ejemplo:servidor` | Levanta el servidor MCP del ERP sintético |
 
