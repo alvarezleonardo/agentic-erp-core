@@ -11,6 +11,7 @@ export const DOMINIOS: DominioDef[] = [
   { nombre: 'cobranzas', descripcion: 'Cuánto debe cada cliente (estado de cuenta, deudores, antigüedad de la deuda, límite de crédito) y registro de cobros' },
   { nombre: 'pagos', descripcion: 'Cuánto se le debe a cada proveedor (cuentas a pagar, vencimientos, agenda de pagos) y registro de pagos a proveedores' },
   { nombre: 'tesoreria', descripcion: 'Cuentas bancarias y sus movimientos, conciliación de los depósitos de caja con el banco, posición de tesorería y transferencias entre cuentas propias' },
+  { nombre: 'precios', descripcion: 'Listas de precios (minorista, mayorista, distribuidores), precio y margen de cada artículo, historial de cambios de precio y cambios de precio' },
 ];
 
 /**
@@ -34,13 +35,16 @@ export const REGLAS: ReglaRouter[] = [
   // Tesorería: «concili\w*» es exclusiva porque «conciliá los depósitos de caja» también dispara caja. Los bancos se nombran por su nombre propio.
   { dominio: 'tesoreria', exclusiva: true, patron: /\bconcili\w*/ },
   { dominio: 'tesoreria', patron: /\bbancos?\b|\bbancari\w*|\btesoreria\b|\bnacion\b|\bgalicia\b|\bsantander\b|\btransferi\w*|\btransferencias? internas?\b/ },
+  // Precios y listas: «margen bajo» es exclusiva porque «margen» también dispara ventas; «precio» y «lista mayorista/minorista» no.
+  { dominio: 'precios', exclusiva: true, patron: /\bmargen(?:es)? (?:bajos?|minimos?|negativos?)\b|\bbajo(?: el)? costo\b/ },
+  { dominio: 'precios', patron: /\bprecios?\b|\blistas? (?:de precios?|minorista|mayorista|de distribuidores)\b|\bminorista\b|\bdistribuidores\b/ },
 ];
 
 export function crearRouter(llm?: LlmProvider): Router {
   const opciones: OpcionesRouter = {
     dominios: DOMINIOS,
     reglas: REGLAS,
-    descripcionDelNegocio: 'El negocio vende artículos de oficina y tecnología en tienda y online; el ERP lleva ventas, stock, compras, caja, facturación a clientes, cobranzas, pagos a proveedores y tesorería (cuentas bancarias).',
+    descripcionDelNegocio: 'El negocio vende artículos de oficina y tecnología en tienda y online; el ERP lleva ventas, stock, compras, caja, facturación a clientes, cobranzas, pagos a proveedores, tesorería (cuentas bancarias) y listas de precios.',
     ...(llm ? { llm } : {}),
   };
   return new Router(opciones);

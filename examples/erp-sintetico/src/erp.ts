@@ -33,7 +33,7 @@ import {
   type StepUp,
   type ValorMetrica,
 } from '@agentic-erp/mcp-contract';
-import { ANOMALIA_CAJA, HOY, INICIO_DATOS, MONEDA, VENTANA_ACREDITACION_DIAS, estadoDeFactura, estadoDeFacturaProveedor, generarDatos, saldoDeCuenta, saldoDeFactura, saldoDeFacturaProveedor, type Articulo, type Cliente, type Cobranza, type CuentaBancaria, type DatosErp, type Factura, type FacturaProveedor, type MedioCobro, type MedioPago, type MovimientoBancario, type MovimientoCaja, type TipoMovimientoBancario, type TransferenciaInterna, type NotaCredito, type OrdenCompra, type PagoProveedor, type Proveedor } from './datos.js';
+import { ANOMALIA_CAJA, HOY, LISTA_MINORISTA, redondear5, INICIO_DATOS, MONEDA, VENTANA_ACREDITACION_DIAS, estadoDeFactura, estadoDeFacturaProveedor, generarDatos, saldoDeCuenta, saldoDeFactura, saldoDeFacturaProveedor, type Articulo, type Cliente, type Cobranza, type CambioPrecio, type CuentaBancaria, type DatosErp, type ListaPrecios, type Factura, type FacturaProveedor, type MedioCobro, type MedioPago, type MovimientoBancario, type MovimientoCaja, type TipoMovimientoBancario, type TransferenciaInterna, type NotaCredito, type OrdenCompra, type PagoProveedor, type Proveedor } from './datos.js';
 import { diaDeSemana, diasEntre, esFecha, rango, sumarDias } from './fechas.js';
 import { ROLES_AUTORIZADORES, ROLES_POR_ESCRITURA } from './permisos.js';
 
@@ -69,6 +69,12 @@ export interface OpcionesErp {
   umbralMotivoPagoProveedor?: number;
   /** Importe de transferencia interna entre cuentas propias, en centavos, desde el cual se pide la confirmación de un supervisor. Por defecto 5000.00. */
   umbralTransferenciaInterna?: number;
+  /**
+   * Precios y listas. `variacionPct`: un cambio de precio de más de este porcentaje (hacia arriba o hacia abajo) pide un supervisor (por defecto 15).
+   * `masivo`: un cambio de más de esta cantidad de artículos pide un supervisor (por defecto 5). `margenMinimoPct`: margen mínimo por defecto
+   * de `articulos_margen_bajo` y de las advertencias (por defecto 15).
+   */
+  umbralesPrecios?: { variacionPct?: number; masivo?: number; margenMinimoPct?: number };
 }
 
 type Efecto =
@@ -78,7 +84,8 @@ type Efecto =
   | { tipo: 'nota_credito'; factura_id: string; importe: number; motivo: string }
   | { tipo: 'cobranza'; cliente_id: string; medio: MedioCobro; importe: number }
   | { tipo: 'pago_proveedor'; proveedor_id: string; medio: MedioPago; importe: number; factura_ids: string[] }
-  | { tipo: 'transferencia_interna'; origen_id: string; destino_id: string; importe: number };
+  | { tipo: 'transferencia_interna'; origen_id: string; destino_id: string; importe: number }
+  | { tipo: 'cambio_precio'; lista_id: string; cambios: { articulo_id: string; precio_anterior: number; precio_nuevo: number }[]; motivo?: string };
 
 interface PropuestaGuardada {
   id: string;
@@ -119,6 +126,10 @@ const UMBRAL_STEP_UP_COBRANZA = 500_000; // 5000.00: cobranzas desde acá piden 
 const UMBRAL_STEP_UP_PAGO_PROVEEDOR = 100_000; // 1000.00: pagos desde acá piden un supervisor
 const UMBRAL_MOTIVO_PAGO_PROVEEDOR = 500_000; // 5000.00: pagos desde acá piden supervisor y motivo
 const UMBRAL_STEP_UP_TRANSFERENCIA = 500_000; // 5000.00: transferencias internas desde acá piden un supervisor
+const UMBRAL_VARIACION_PRECIO_PCT = 15; // un cambio de precio de más de 15 % (hacia arriba o abajo) pide un supervisor
+const UMBRAL_CAMBIO_MASIVO = 5; // un cambio de más de 5 artículos pide un supervisor
+const MARGEN_MINIMO_PCT = 15; // margen por debajo del cual un artículo se considera de margen bajo
+const MODOS_CAMBIO_PRECIO = ['precio', 'porcentaje', 'margen'] as const;
 const CONCEPTO_DEPOSITO_CAJA = 'Depósito bancario';
 const TIPOS_MOVIMIENTO_BANCARIO: readonly TipoMovimientoBancario[] = ['deposito_caja', 'acreditacion_cliente', 'debito_proveedor', 'comision', 'impuesto', 'transferencia_interna'];
 const MEDIOS_PAGO: readonly MedioPago[] = ['efectivo', 'transferencia'];
@@ -157,6 +168,20 @@ interface DepositoConciliado {
   credito: MovimientoBancario | undefined;
   estado: 'conciliado' | 'con_diferencia' | 'pendiente';
 }
+
+/** Porcentaje tal como lo escribe una persona: «8», «-12.5», «8,5 %». Devuelve centésimas de punto (800 es 8 %). */
+export function parsearPorcentaje(v: unknown, campo = 'porcentaje'): number {
+  const s = typeof v === 'number' ? String(v) : typeof v === 'string' ? v.trim() : '';
+  const m = /^([+-]?)(\d{1,4})(?:[.,](\d{1,2}))?\s*%?$/.exec(s);
+  if (!m) throw new ErrorErp('PARAMETRO_INVALIDO', `${campo} no es válido. Usá un número con hasta dos decimales, por ejemplo 8 o 12,5.`, 'Pedile a la persona el porcentaje de nuevo.');
+  const bp = Number(m[2]) * 100 + Number((m[3] ?? '').padEnd(2, '0'));
+  return m[1] === '-' ? -bp : bp;
+}
+
+/** Margen sobre el precio de venta, en centésimas de punto: (precio - costo) / precio. */
+const margenBp = (precio: number, costo: number): number => Math.round(((precio - costo) * 10_000) / precio);
+const textoPct = (bp: number): string => `${(bp / 100).toFixed(1)}`;
+const textoVariacion = (bp: number): string => `${bp > 0 ? '+' : ''}${(bp / 100).toFixed(1)}`;
 
 /** Importe tal como lo escribe una persona: «150», «150.5», «150,50». Devuelve centavos. */
 export function parsearImporte(v: unknown): number {
@@ -202,6 +227,9 @@ export class ErpSintetico {
   private readonly umbralPagoProveedor: number;
   private readonly umbralMotivoPagoProveedor: number;
   private readonly umbralTransferenciaInterna: number;
+  private readonly umbralVariacionPrecioBp: number;
+  private readonly umbralMasivoPrecios: number;
+  private readonly margenMinimoBp: number;
 
   constructor(o: OpcionesErp = {}) {
     this.datos = o.datos ?? generarDatos();
@@ -216,6 +244,9 @@ export class ErpSintetico {
     this.umbralPagoProveedor = o.umbralPagoProveedor ?? UMBRAL_STEP_UP_PAGO_PROVEEDOR;
     this.umbralMotivoPagoProveedor = o.umbralMotivoPagoProveedor ?? UMBRAL_MOTIVO_PAGO_PROVEEDOR;
     this.umbralTransferenciaInterna = o.umbralTransferenciaInterna ?? UMBRAL_STEP_UP_TRANSFERENCIA;
+    this.umbralVariacionPrecioBp = (o.umbralesPrecios?.variacionPct ?? UMBRAL_VARIACION_PRECIO_PCT) * 100;
+    this.umbralMasivoPrecios = o.umbralesPrecios?.masivo ?? UMBRAL_CAMBIO_MASIVO;
+    this.margenMinimoBp = (o.umbralesPrecios?.margenMinimoPct ?? MARGEN_MINIMO_PCT) * 100;
     this.cierres = this.calcularCierres();
     this.sembrarEventos();
   }
@@ -1355,6 +1386,108 @@ export class ErpSintetico {
     };
   }
 
+
+  // ------------------------------------------------------------------ precios y listas
+
+  /** Una lista por su código o por su nombre («mayorista», «Lista Mayorista»). */
+  private lista(ref: unknown): ListaPrecios {
+    const q = normalizar(String(ref ?? '')).replace(/^lista\s+/, '').trim();
+    const l = q ? this.datos.listasPrecios.find((x) => x.id === q || normalizar(x.nombre) === q) : undefined;
+    if (!l) throw new ErrorErp('NO_ENCONTRADO', `No existe la lista de precios ${String(ref)}.`, `Las listas son: ${this.datos.listasPrecios.map((x) => x.nombre).join(', ')}.`);
+    return l;
+  }
+
+  /** Precio vigente de un artículo en una lista. La Minorista es el precio del propio artículo. */
+  private precioEn(lista: ListaPrecios, a: Articulo): number {
+    if (lista.id === LISTA_MINORISTA) return a.precio;
+    const p = this.datos.preciosLista.find((x) => x.lista_id === lista.id && x.articulo_id === a.id);
+    if (!p) throw new ErrorErp('NO_ENCONTRADO', `El artículo ${a.nombre} no tiene precio en la lista ${lista.nombre}.`);
+    return p.precio;
+  }
+
+  private estadoMargen(precio: number, costo: number, minimoBp: number): 'ok' | 'margen_bajo' | 'bajo_costo' {
+    return precio < costo ? 'bajo_costo' : margenBp(precio, costo) < minimoBp ? 'margen_bajo' : 'ok';
+  }
+
+  private columnasPrecios(): SalidaTabla['columnas'] {
+    return [
+      { id: 'articulo_id', etiqueta: 'Código', tipo: 'texto' },
+      { id: 'nombre', etiqueta: 'Artículo', tipo: 'texto' },
+      { id: 'categoria', etiqueta: 'Categoría', tipo: 'texto' },
+      { id: 'lista', etiqueta: 'Lista', tipo: 'texto' },
+      { id: 'precio', etiqueta: 'Precio', tipo: 'dinero' },
+      { id: 'costo', etiqueta: 'Costo', tipo: 'dinero' },
+      { id: 'margen_pct', etiqueta: 'Margen %', tipo: 'porcentaje' },
+      { id: 'estado', etiqueta: 'Estado', tipo: 'estado' },
+    ];
+  }
+
+  private filaPrecio(lista: ListaPrecios, a: Articulo, minimoBp: number): Obj {
+    const precio = this.precioEn(lista, a);
+    return { articulo_id: a.id, nombre: a.nombre, categoria: a.categoria, lista: lista.nombre, precio: dinero(precio), costo: dinero(a.costo), margen_pct: textoPct(margenBp(precio, a.costo)), estado: this.estadoMargen(precio, a.costo, minimoBp) };
+  }
+
+  /** Precios vigentes por lista, categoría o artículo, con el costo y el margen calculados por el servidor. Sin lista, trae todas. */
+  listarPrecios(a: Obj): SalidaTabla {
+    const listas = a['lista'] === undefined ? this.datos.listasPrecios : [this.lista(a['lista'])];
+    const art = a['articulo_id'] === undefined ? undefined : this.articulo(a['articulo_id']);
+    const cat = a['categoria'] === undefined ? undefined : normalizar(String(a['categoria']));
+    const arts = this.datos.articulos.filter((x) => (!art || x.id === art.id) && (!cat || normalizar(x.categoria) === cat));
+    if (cat && arts.length === 0) throw new ErrorErp('NO_ENCONTRADO', `No hay artículos en la categoría ${String(a['categoria'])}.`, 'Las categorías son: ' + [...new Set(this.datos.articulos.map((x) => x.categoria))].join(', ') + '.');
+    const filas = listas.flatMap((l) => arts.map((x) => this.filaPrecio(l, x, this.margenMinimoBp)));
+    const alcance = [listas.length === 1 ? `lista ${listas[0]?.nombre}` : 'todas las listas', art ? art.nombre : undefined, cat ? String(a['categoria']) : undefined].filter(Boolean).join(', ');
+    return { titulo: `Precios, ${alcance}: ${filas.length}`, columnas: this.columnasPrecios(), filas, total_filas: filas.length };
+  }
+
+  historialPrecios(a: Obj): SalidaTabla {
+    const art = this.articulo(a['articulo_id']);
+    const lista = a['lista'] === undefined ? undefined : this.lista(a['lista']);
+    const limite = a['limite'] === undefined ? 50 : entero(a['limite'], 'limite', 1, 200);
+    const todos = this.datos.cambiosPrecio.filter((c) => c.articulo_id === art.id && (!lista || c.lista_id === lista.id)).sort((x, y) => y.fecha.localeCompare(x.fecha) || y.id.localeCompare(x.id));
+    return {
+      titulo: `Historial de precios de ${art.nombre}${lista ? `, lista ${lista.nombre}` : ''}: ${todos.length} ${todos.length === 1 ? 'cambio' : 'cambios'}`,
+      columnas: [
+        { id: 'cambio_id', etiqueta: 'Cambio', tipo: 'texto' },
+        { id: 'fecha', etiqueta: 'Fecha', tipo: 'fecha' },
+        { id: 'lista', etiqueta: 'Lista', tipo: 'texto' },
+        { id: 'precio_anterior', etiqueta: 'Precio anterior', tipo: 'dinero' },
+        { id: 'precio_nuevo', etiqueta: 'Precio nuevo', tipo: 'dinero' },
+        { id: 'variacion_pct', etiqueta: 'Variación %', tipo: 'porcentaje' },
+        { id: 'usuario', etiqueta: 'Quién', tipo: 'texto' },
+        { id: 'motivo', etiqueta: 'Motivo', tipo: 'texto' },
+      ],
+      filas: todos.slice(0, limite).map((c) => ({
+        cambio_id: c.id,
+        fecha: c.fecha,
+        lista: this.lista(c.lista_id).nombre,
+        precio_anterior: dinero(c.precio_anterior),
+        precio_nuevo: dinero(c.precio_nuevo),
+        variacion_pct: textoVariacion(Math.round(((c.precio_nuevo - c.precio_anterior) * 10_000) / c.precio_anterior)),
+        usuario: c.usuario,
+        motivo: c.motivo,
+      })),
+      total_filas: todos.length,
+    };
+  }
+
+  /** Artículos cuyo margen (precio - costo) / precio en una lista queda por debajo de un mínimo, del peor al mejor. */
+  articulosMargenBajo(a: Obj): SalidaTabla {
+    const minimoBp = a['margen_minimo_pct'] === undefined ? this.margenMinimoBp : parsearPorcentaje(a['margen_minimo_pct'], 'margen_minimo_pct');
+    if (minimoBp < 0 || minimoBp > 10_000) throw new ErrorErp('PARAMETRO_INVALIDO', 'margen_minimo_pct debe estar entre 0 y 100.');
+    const listas = a['lista'] === undefined ? this.datos.listasPrecios : [this.lista(a['lista'])];
+    const hallados = listas
+      .flatMap((l) => this.datos.articulos.map((x) => ({ l, x, precio: this.precioEn(l, x) })))
+      .filter((r) => margenBp(r.precio, r.x.costo) < minimoBp)
+      .sort((p, q) => margenBp(p.precio, p.x.costo) - margenBp(q.precio, q.x.costo) || p.x.id.localeCompare(q.x.id));
+    const bajoCosto = hallados.filter((r) => r.precio < r.x.costo).length;
+    return {
+      titulo: `Margen menor a ${textoPct(minimoBp)} %${listas.length === 1 ? `, lista ${listas[0]?.nombre}` : ''}: ${hallados.length} (${bajoCosto} bajo el costo)`,
+      columnas: this.columnasPrecios(),
+      filas: hallados.map((r) => this.filaPrecio(r.l, r.x, minimoBp)),
+      total_filas: hallados.length,
+    };
+  }
+
   // ------------------------------------------------------------------ escrituras: preparar
 
   private exigirRol(tool: string, ctx: ContextoSesion): void {
@@ -1622,6 +1755,90 @@ export class ErpSintetico {
     });
   }
 
+  /**
+   * Cambia el precio de uno o varios artículos en una lista. El servidor calcula los precios nuevos:
+   * - `precio`: el precio nuevo es el valor tal cual lo dijo la persona.
+   * - `porcentaje`: precio actual por (1 + valor / 100), redondeado al múltiplo de 5 centavos más cercano (las mitades suben).
+   * - `margen`: el precio que deja ese margen sobre el costo, costo / (1 - valor / 100), redondeado hacia arriba a 5 centavos para no
+   *   quedar por debajo del margen pedido.
+   * Rechaza precios no positivos. Advierte (no rechaza) si algún artículo queda por debajo del costo. Pide un supervisor si algún
+   * artículo cambia más del umbral de variación o si cambian más artículos que el umbral de cambio masivo, y un supervisor y el motivo
+   * si algún artículo queda por debajo del costo.
+   */
+  prepararCambioPrecio(a: Obj, ctx: ContextoSesion): Propuesta {
+    this.exigirRol('preparar_cambio_precio', ctx);
+    const lista = this.lista(a['lista']);
+    const modo = a['modo'];
+    if (typeof modo !== 'string' || !(MODOS_CAMBIO_PRECIO as readonly string[]).includes(modo)) throw new ErrorErp('PARAMETRO_INVALIDO', 'modo debe ser precio, porcentaje o margen.', 'Preguntale a la persona cómo quiere cambiar el precio.');
+    if (a['valor'] === undefined) throw new ErrorErp('PARAMETRO_INVALIDO', 'Falta el valor del cambio (el precio nuevo, el porcentaje o el margen).', 'Preguntale a la persona el valor.');
+    if (a['articulo_ids'] !== undefined && a['categoria'] !== undefined) throw new ErrorErp('PARAMETRO_INVALIDO', 'Indicá articulo_ids o categoria, no los dos.');
+    let arts: Articulo[];
+    if (a['articulo_ids'] !== undefined) {
+      const ids = a['articulo_ids'];
+      if (!Array.isArray(ids) || ids.length === 0 || ids.length > 100 || ids.some((x) => typeof x !== 'string')) throw new ErrorErp('PARAMETRO_INVALIDO', 'articulo_ids debe ser una lista de entre 1 y 100 códigos de artículo.');
+      if (new Set(ids).size !== ids.length) throw new ErrorErp('PARAMETRO_INVALIDO', 'articulo_ids tiene artículos repetidos.');
+      arts = (ids as string[]).map((id) => this.articulo(id));
+    } else if (a['categoria'] !== undefined) {
+      const cat = normalizar(String(a['categoria']));
+      arts = this.datos.articulos.filter((x) => normalizar(x.categoria) === cat);
+      if (arts.length === 0) throw new ErrorErp('NO_ENCONTRADO', `No hay artículos en la categoría ${String(a['categoria'])}.`, 'Las categorías son: ' + [...new Set(this.datos.articulos.map((x) => x.categoria))].join(', ') + '.');
+    } else throw new ErrorErp('PARAMETRO_INVALIDO', 'Indicá articulo_ids o categoria.', 'Preguntale a la persona qué artículos o qué categoría.');
+    if (a['motivo'] !== undefined && (typeof a['motivo'] !== 'string' || a['motivo'].trim().length < 3 || a['motivo'].length > MAX_MOTIVO)) throw new ErrorErp('PARAMETRO_INVALIDO', `El motivo debe tener entre 3 y ${MAX_MOTIVO} caracteres.`);
+    const motivo = typeof a['motivo'] === 'string' ? a['motivo'].trim() : undefined;
+
+    const precioFijo = modo === 'precio' ? parsearImporte(a['valor']) : undefined;
+    const bp = modo === 'precio' ? 0 : parsearPorcentaje(a['valor'], modo === 'margen' ? 'El margen' : 'El porcentaje');
+    if (modo === 'porcentaje' && bp <= -10_000) throw new ErrorErp('PRECIO_INVALIDO', 'Una baja de 100 % o más dejaría el precio en cero o negativo.', 'Pedí una baja menor.');
+    if (modo === 'margen' && (bp < 0 || bp > 9_500)) throw new ErrorErp('PARAMETRO_INVALIDO', 'El margen debe estar entre 0 y 95 %.');
+
+    const calculados = arts.map((x) => {
+      const actual = this.precioEn(lista, x);
+      let nuevo: number;
+      if (precioFijo !== undefined) nuevo = precioFijo;
+      else if (modo === 'porcentaje') nuevo = redondear5(Math.round((actual * (10_000 + bp)) / 10_000));
+      else nuevo = Math.ceil(Math.floor((x.costo * 10_000 + (10_000 - bp) - 1) / (10_000 - bp)) / 5) * 5;
+      if (nuevo <= 0) throw new ErrorErp('PRECIO_INVALIDO', `El precio nuevo de ${x.nombre} no es mayor que cero.`, 'Pedí un precio o una baja menor.');
+      return { x, actual, nuevo };
+    });
+    const cambian = calculados.filter((c) => c.nuevo !== c.actual);
+    if (cambian.length === 0) throw new ErrorErp('SIN_CAMBIOS', 'Con ese valor ningún artículo cambia de precio.', 'Los precios ya están como se pidió.');
+    const sinCambio = calculados.filter((c) => c.nuevo === c.actual);
+
+    const variacion = (c: { actual: number; nuevo: number }): number => Math.round(((c.nuevo - c.actual) * 10_000) / c.actual);
+    const bajoCosto = cambian.filter((c) => c.nuevo < c.x.costo);
+    const grandes = cambian.filter((c) => Math.abs(variacion(c)) > this.umbralVariacionPrecioBp);
+    const masivo = cambian.length > this.umbralMasivoPrecios;
+    const stepUp: StepUp = bajoCosto.length > 0 ? 'supervisor_y_motivo' : grandes.length > 0 || masivo ? 'supervisor' : 'none';
+
+    const efecto: Efecto = { tipo: 'cambio_precio', lista_id: lista.id, cambios: cambian.map((c) => ({ articulo_id: c.x.id, precio_anterior: c.actual, precio_nuevo: c.nuevo })), ...(motivo ? { motivo } : {}) };
+    const p = this.guardar(efecto, undefined, stepUp, ctx);
+    this.aud(ctx, 'preparar_cambio_precio');
+
+    const advertencias: string[] = [];
+    for (const c of bajoCosto) advertencias.push(`${c.x.nombre} queda por debajo del costo (${fmt(c.nuevo)} con un costo de ${fmt(c.x.costo)}).`);
+    for (const c of cambian) if (c.nuevo >= c.x.costo && margenBp(c.nuevo, c.x.costo) < this.margenMinimoBp) advertencias.push(`${c.x.nombre} queda con un margen de ${textoPct(margenBp(c.nuevo, c.x.costo))} %, menor al mínimo de ${textoPct(this.margenMinimoBp)} %.`);
+    if (sinCambio.length > 0) advertencias.push(`No cambian porque ya tienen ese precio: ${sinCambio.map((c) => c.x.nombre).join(', ')}.`);
+    if (grandes.length > 0) advertencias.push(`Los cambios de más de ${textoPct(this.umbralVariacionPrecioBp)} % en un artículo necesitan la confirmación de un supervisor.`);
+    if (masivo) advertencias.push(`Los cambios de más de ${this.umbralMasivoPrecios} artículos a la vez necesitan la confirmación de un supervisor.`);
+    if (bajoCosto.length > 0) advertencias.push('Dejar un precio por debajo del costo necesita la confirmación de un supervisor y el motivo.');
+    if (modo !== 'precio') advertencias.push(modo === 'porcentaje' ? 'Los precios se redondean al múltiplo de 5 centavos más cercano.' : 'Los precios se redondean hacia arriba a múltiplos de 5 centavos, para no quedar por debajo del margen pedido.');
+    advertencias.push('Al confirmar rige el precio nuevo desde hoy: las ventas ya registradas no cambian.');
+
+    return this.propuesta(p, {
+      titulo: `Cambio de precios en la lista ${lista.nombre}`,
+      resumen: [
+        { etiqueta: 'Lista', valor: lista.nombre },
+        { etiqueta: 'Cambio pedido', valor: modo === 'precio' ? `Precio nuevo de ${fmt(precioFijo as number)}` : modo === 'porcentaje' ? `${textoVariacion(bp)} %` : `Alinear al margen de ${textoPct(bp)} %` },
+        { etiqueta: 'Artículos que cambian', valor: String(cambian.length) },
+      ],
+      lineas: cambian.map((c) => ({
+        descripcion: `${c.x.nombre}: ${fmt(c.actual)} a ${fmt(c.nuevo)} (${textoVariacion(variacion(c))} %), margen ${textoPct(margenBp(c.actual, c.x.costo))} % a ${textoPct(margenBp(c.nuevo, c.x.costo))} %, costo ${fmt(c.x.costo)}`,
+        precio_unitario: dinero(c.nuevo),
+      })),
+      advertencias,
+    });
+  }
+
   private advertenciaStepUpPago(stepUp: Exclude<StepUp, 'none'>): string {
     return stepUp === 'supervisor_y_motivo'
       ? `Los pagos a proveedores de ${montoUmbral(this.umbralMotivoPagoProveedor)} o más necesitan la confirmación de un supervisor y el motivo.`
@@ -1636,7 +1853,7 @@ export class ErpSintetico {
 
   // ------------------------------------------------------------------ escrituras: confirmar
 
-  async confirmar(tool: 'ajuste_stock' | 'orden_compra' | 'movimiento_caja' | 'nota_credito' | 'cobranza' | 'pago_proveedor' | 'transferencia_interna', a: Obj, ctx: ContextoSesion): Promise<ConfirmarSalida> {
+  async confirmar(tool: 'ajuste_stock' | 'orden_compra' | 'movimiento_caja' | 'nota_credito' | 'cobranza' | 'pago_proveedor' | 'transferencia_interna' | 'cambio_precio', a: Obj, ctx: ContextoSesion): Promise<ConfirmarSalida> {
     this.exigirRol(`preparar_${tool}`, ctx);
     const p = typeof a['proposal_id'] === 'string' ? this.propuestas.get(a['proposal_id']) : undefined;
     if (!p || p.efecto.tipo !== tool) throw new ErrorErp('PROPUESTA_NO_ENCONTRADA', 'No existe esa propuesta.');
@@ -1812,6 +2029,29 @@ export class ErpSintetico {
         ...(p.total ? { total: p.total } : {}),
       };
       mensaje = `Transferencia interna ${transferencia.numero} registrada de ${origen.nombre} a ${destino.nombre}.`;
+    } else if (e.tipo === 'cambio_precio') {
+      const lista = this.lista(e.lista_id);
+      // Entre preparar y confirmar el precio pudo cambiar (otro cambio): se verifica contra el estado real.
+      for (const c of e.cambios) {
+        const actual = this.precioEn(lista, this.articulo(c.articulo_id));
+        if (actual !== c.precio_anterior) throw new ErrorErp('PRECIO_CAMBIADO', `El precio de ${this.articulo(c.articulo_id).nombre} cambió desde que se preparó (ahora ${fmt(actual)}).`, 'Pedí la operación de nuevo.');
+      }
+      const registrados: CambioPrecio[] = [];
+      for (const c of e.cambios) {
+        const art = this.articulo(c.articulo_id);
+        if (lista.id === LISTA_MINORISTA) art.precio = c.precio_nuevo;
+        else {
+          const fila = this.datos.preciosLista.find((x) => x.lista_id === lista.id && x.articulo_id === art.id);
+          if (!fila) throw new ErrorErp('NO_ENCONTRADO', `El artículo ${art.nombre} no tiene precio en la lista ${lista.nombre}.`);
+          fila.precio = c.precio_nuevo;
+        }
+        const cambio: CambioPrecio = { id: `cpr_${String(this.datos.cambiosPrecio.length + 1).padStart(4, '0')}`, articulo_id: art.id, lista_id: lista.id, precio_anterior: c.precio_anterior, precio_nuevo: c.precio_nuevo, fecha: HOY, usuario: ctx.usuario, motivo: motivo ?? e.motivo ?? 'Sin motivo indicado' };
+        this.datos.cambiosPrecio.push(cambio);
+        registrados.push(cambio);
+      }
+      this.emitir('precios_modificados', { lista_id: lista.id, articulos: registrados.length });
+      resultado = { lista_id: lista.id, cambios: registrados.map((c) => ({ cambio_id: c.id, articulo_id: c.articulo_id, precio_nuevo: dinero(c.precio_nuevo) })) };
+      mensaje = `Precios actualizados en la lista ${lista.nombre}: ${registrados.length} ${registrados.length === 1 ? 'artículo' : 'artículos'}.`;
     } else {
       const mov: MovimientoCaja = { id: `mov_${String(this.datos.movimientos.length + 1).padStart(4, '0')}`, fecha: HOY, ...e.mov };
       this.datos.movimientos.push(mov);
