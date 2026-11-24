@@ -39,6 +39,7 @@
     "test": "vitest run",
     "eval": "tsx evals/runner.ts",
     "demo": "tsx examples/erp-sintetico/src/demo.ts",
+    "ejemplo:auditoria": "tsx examples/erp-sintetico/src/auditoria.ts",
     "ejemplo:servidor": "tsx examples/erp-sintetico/src/main.ts",
     "check": "npm run typecheck && npm test && npm run eval"
   },

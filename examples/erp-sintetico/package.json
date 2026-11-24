@@ -30,7 +30,8 @@
     "mcp-server"
   ],
   "scripts": {
-    "demo": "tsx src/demo.ts"
+    "demo": "tsx src/demo.ts",
+    "auditoria": "tsx src/auditoria.ts"
   },
   "dependencies": {
     "@agentic-erp/core": "0.1.1",
