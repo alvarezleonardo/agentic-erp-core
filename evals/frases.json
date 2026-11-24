@@ -67,6 +67,20 @@
     { "id": "cruz-01", "texto": "cuánto vendimos y cómo está la caja", "rol": "gerente", "esperado": { "origen": "reglas", "plan": ["ventas", "caja"], "tools": ["consultar_metrica", "estado_caja"], "componente": "DetailCard" },
       "guion": [ { "llamar": "consultar_metrica", "args": { "metricas": ["ventas_total"], "desde": "2026-03-01", "hasta": "2026-03-31" } }, { "final": "render_ui", "component": "KpiTiles" }, { "llamar": "estado_caja", "args": {} }, { "final": "render_ui", "component": "DetailCard" } ] },
     { "id": "sin-01", "texto": "hola, ¿me ayudás?", "rol": "gerente", "esperado": { "origen": "sin_clasificar", "plan": [], "tools": [], "componente": "Clarification" },
-      "guion": [ { "router": [] } ] }
+      "guion": [ { "router": [] } ] },
+    { "id": "fac-01", "texto": "qué facturamos este mes", "rol": "gerente", "esperado": { "origen": "reglas", "plan": ["facturacion"], "tools": ["resumen_facturacion"], "componente": "KpiTiles" },
+      "guion": [ { "llamar": "resumen_facturacion", "args": { "desde": "2026-03-01", "hasta": "2026-03-31" } }, { "final": "render_ui", "component": "KpiTiles" } ] },
+    { "id": "fac-02", "texto": "las facturas pendientes de Gómez Hnos.", "rol": "gerente", "esperado": { "origen": "reglas", "plan": ["facturacion"], "tools": ["buscar_clientes", "listar_facturas"], "componente": "DataTable" },
+      "guion": [ { "llamar": "buscar_clientes", "args": { "texto": "Gómez Hnos" } }, { "llamar": "listar_facturas", "args": { "cliente_id": "cli_03", "solo_con_saldo": true } }, { "final": "render_ui", "component": "DataTable" } ] },
+    { "id": "fac-03", "texto": "mostrame la factura 0001-00001234", "rol": "gerente", "esperado": { "origen": "reglas", "plan": ["facturacion"], "tools": ["obtener_factura"], "componente": "DetailCard" },
+      "guion": [ { "llamar": "obtener_factura", "args": { "numero": "0001-00001234" } }, { "final": "render_ui", "component": "DetailCard" } ] },
+    { "id": "fac-04", "texto": "hacé una nota de crédito por la factura 0001-00001234 porque vino un artículo fallado", "rol": "operador", "esperado": { "origen": "reglas", "plan": ["facturacion"], "tools": ["obtener_factura", "preparar_nota_credito"], "componente": "ConfirmationCard", "step_up": true },
+      "guion": [ { "llamar": "obtener_factura", "args": { "numero": "0001-00001234" } }, { "llamar": "preparar_nota_credito", "args": { "factura_id": "fac_0069", "motivo": "Artículo fallado" } }, { "final": "render_ui", "component": "ConfirmationCard" } ] },
+    { "id": "fac-05", "texto": "nota de crédito para Gómez", "rol": "operador", "esperado": { "origen": "reglas", "plan": ["facturacion"], "tools": ["buscar_clientes"], "componente": "Clarification" },
+      "guion": [ { "llamar": "buscar_clientes", "args": { "texto": "Gómez" } }, { "final": "clarify", "pregunta": "¿Para cuál cliente es la nota de crédito?", "opciones_desde": "cliente_id" } ] },
+    { "id": "fac-06", "texto": "hacé una nota de crédito por la factura 0001-00001234", "rol": "operador", "esperado": { "origen": "reglas", "plan": ["facturacion"], "tools": ["obtener_factura"], "componente": "FormCard" },
+      "guion": [ { "llamar": "obtener_factura", "args": { "numero": "0001-00001234" } }, { "final": "render_ui", "component": "FormCard", "data": { "titulo": "Motivo de la nota de crédito", "campos": [ { "id": "motivo", "etiqueta": "Motivo de la nota de crédito", "tipo": "texto", "requerido": true } ] }, "sin_fuente": true } ] },
+    { "id": "fac-07", "texto": "qué le emitimos a Gómez Hnos. en marzo", "rol": "gerente", "esperado": { "origen": "llm", "plan": ["facturacion"], "tools": ["buscar_clientes", "listar_facturas"], "componente": "DataTable" },
+      "guion": [ { "router": ["facturacion"] }, { "llamar": "buscar_clientes", "args": { "texto": "Gómez Hnos" } }, { "llamar": "listar_facturas", "args": { "cliente_id": "cli_03", "desde": "2026-03-01", "hasta": "2026-03-31" } }, { "final": "render_ui", "component": "DataTable" } ] }
   ]
 }

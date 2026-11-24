@@ -69,6 +69,63 @@ export interface Arqueo {
   contado: number;
 }
 
+export interface Cliente {
+  id: string;
+  nombre: string;
+  condicion_pago: 'contado' | 'cuenta_corriente';
+  /** Centavos. Cero para los clientes de contado. */
+  limite_credito: number;
+  /** Letra de los comprobantes que se le emiten: A (responsable inscripto) o B. */
+  tipo_comprobante: 'A' | 'B';
+  plazo_dias: number;
+}
+
+export type EstadoFactura = 'emitida' | 'anulada' | 'parcialmente_cobrada' | 'cobrada';
+
+/**
+ * Factura de venta. El saldo pendiente no se guarda: es `importe - cobrado - acreditado` (ver `saldoDeFactura`), así
+ * que cobranzas solo suma a `cobrado` y facturación solo suma a `acreditado`. `estado` se mantiene con `estadoDeFactura`.
+ */
+export interface Factura {
+  id: string;
+  /** Punto de venta y número, por ejemplo 0001-00001234. La numeración es correlativa por letra. */
+  numero: string;
+  tipo: 'A' | 'B';
+  cliente_id: string;
+  fecha: string;
+  vencimiento: string;
+  /** Centavos. */
+  importe: number;
+  /** Centavos cobrados hasta hoy. */
+  cobrado: number;
+  /** Centavos acreditados por notas de crédito. */
+  acreditado: number;
+  estado: EstadoFactura;
+}
+
+export interface NotaCredito {
+  id: string;
+  numero: string;
+  tipo: 'A' | 'B';
+  factura_id: string;
+  fecha: string;
+  /** Centavos. */
+  importe: number;
+  motivo: string;
+}
+
+/** Saldo pendiente de una factura, en centavos. */
+export const saldoDeFactura = (f: Pick<Factura, 'importe' | 'cobrado' | 'acreditado'>): number => f.importe - f.cobrado - f.acreditado;
+
+/**
+ * Estado que corresponde a una factura según sus importes. Una factura sin cobros cuyo saldo se acreditó por completo
+ * queda anulada; si ya tenía cobros, queda cobrada.
+ */
+export function estadoDeFactura(f: Pick<Factura, 'importe' | 'cobrado' | 'acreditado'>): EstadoFactura {
+  if (saldoDeFactura(f) > 0) return f.cobrado > 0 ? 'parcialmente_cobrada' : 'emitida';
+  return f.cobrado === 0 ? 'anulada' : 'cobrada';
+}
+
 export interface DatosErp {
   proveedores: Proveedor[];
   articulos: Articulo[];
@@ -76,6 +133,9 @@ export interface DatosErp {
   ordenes: OrdenCompra[];
   movimientos: MovimientoCaja[];
   arqueos: Arqueo[];
+  clientes: Cliente[];
+  facturas: Factura[];
+  notasCredito: NotaCredito[];
 }
 
 /** Generador pseudoaleatorio determinista (mulberry32). */
@@ -170,7 +230,96 @@ export function generarDatos(): DatosErp {
     apertura = contado;
   }
 
-  return { proveedores: PROVEEDORES.map((p) => ({ ...p })), articulos, ventas, ordenes, movimientos, arqueos };
+  return { proveedores: PROVEEDORES.map((p) => ({ ...p })), articulos, ventas, ordenes, movimientos, arqueos, ...generarFacturacion() };
+}
+
+// ---------------------------------------------------------------------------------------------------------- facturación
+
+/**
+ * Clientes. Importes en centavos. Casos sembrados a propósito:
+ * - Dos homónimos, «Gómez Hnos.» (cuenta corriente) y «Gómez, Laura» (contado): «Gómez» a secas es ambiguo.
+ * - «Colegio San Martín» (cli_05) no paga nunca: todas sus facturas quedan vencidas.
+ * - «Distribuidora Norte SRL» (cli_07) tiene un límite de crédito bajo y lo supera con lo que debe (el único cliente que lo supera).
+ */
+const CLIENTES: Cliente[] = [
+  { id: 'cli_01', nombre: 'Ferretería del Centro S.A.', condicion_pago: 'cuenta_corriente', limite_credito: 3_000_000, tipo_comprobante: 'A', plazo_dias: 30 },
+  { id: 'cli_02', nombre: 'Estudio Contable Ríos', condicion_pago: 'cuenta_corriente', limite_credito: 1_200_000, tipo_comprobante: 'A', plazo_dias: 30 },
+  { id: 'cli_03', nombre: 'Gómez Hnos.', condicion_pago: 'cuenta_corriente', limite_credito: 2_500_000, tipo_comprobante: 'A', plazo_dias: 30 },
+  { id: 'cli_04', nombre: 'Gómez, Laura', condicion_pago: 'contado', limite_credito: 0, tipo_comprobante: 'B', plazo_dias: 0 },
+  { id: 'cli_05', nombre: 'Colegio San Martín', condicion_pago: 'cuenta_corriente', limite_credito: 5_000_000, tipo_comprobante: 'A', plazo_dias: 30 },
+  { id: 'cli_06', nombre: 'Kiosco La Esquina', condicion_pago: 'contado', limite_credito: 0, tipo_comprobante: 'B', plazo_dias: 0 },
+  { id: 'cli_07', nombre: 'Distribuidora Norte SRL', condicion_pago: 'cuenta_corriente', limite_credito: 1_500_000, tipo_comprobante: 'A', plazo_dias: 30 },
+  { id: 'cli_08', nombre: 'Panadería Don Julio', condicion_pago: 'contado', limite_credito: 0, tipo_comprobante: 'B', plazo_dias: 0 },
+  { id: 'cli_09', nombre: 'Consultorio Dra. Peralta', condicion_pago: 'cuenta_corriente', limite_credito: 2_000_000, tipo_comprobante: 'A', plazo_dias: 15 },
+  { id: 'cli_10', nombre: 'Inmobiliaria Cuyo', condicion_pago: 'cuenta_corriente', limite_credito: 1_800_000, tipo_comprobante: 'A', plazo_dias: 30 },
+  { id: 'cli_11', nombre: 'Taller Mecánico Ibarra', condicion_pago: 'cuenta_corriente', limite_credito: 1_500_000, tipo_comprobante: 'A', plazo_dias: 30 },
+  { id: 'cli_12', nombre: 'Librería Atenea', condicion_pago: 'contado', limite_credito: 0, tipo_comprobante: 'B', plazo_dias: 0 },
+];
+
+const CLIENTE_MOROSO = 'cli_05';
+const CLIENTE_EXCEDIDO = 'cli_07';
+const PRIMER_NUMERO: Record<'A' | 'B', number> = { A: 1_180, B: 3_460 };
+const PRIMER_NUMERO_NC: Record<'A' | 'B', number> = { A: 41, B: 112 };
+
+const numeroComprobante = (n: number): string => `0001-${String(n).padStart(8, '0')}`;
+
+/**
+ * Genera clientes, facturas de venta y notas de crédito. Usa su propio generador (semilla distinta) para no alterar
+ * ni un número de los datos de ventas y caja. Las facturas son comprobantes aparte: no desglosan las ventas de
+ * mostrador y online, que el ERP sintético lleva agregadas por artículo y no por cliente.
+ *
+ * Reglas del generador: los clientes de contado pagan en el acto; los de cuenta corriente pagan casi todo lo anterior
+ * a mediados de febrero (con algún pago parcial) y dejan abierto lo reciente. El moroso no paga nada y el excedido
+ * deja abierto todo desde fines de enero. Dos facturas quedan anuladas con una nota de crédito total y una tiene una
+ * nota de crédito parcial, para que haya historia antes de que el agente emita las suyas.
+ */
+function generarFacturacion(): Pick<DatosErp, 'clientes' | 'facturas' | 'notasCredito'> {
+  const rng = mulberry32(SEMILLA ^ 0xfac7);
+  const bruto: Omit<Factura, 'id' | 'numero' | 'estado'>[] = [];
+  for (const fecha of rango(INICIO_DATOS, HOY)) {
+    for (const c of CLIENTES) {
+      // Se consumen siempre las mismas tiradas por cliente y día, haya o no factura.
+      const emite = rng();
+      const monto = rng();
+      const cobro = rng();
+      const parte = rng();
+      const cc = c.condicion_pago === 'cuenta_corriente';
+      if (emite >= (cc ? 0.1 : 0.06)) continue;
+      const importe = cc ? Math.round((80_000 + monto * 520_000) / 5) * 5 : Math.round((2_000 + monto * 60_000) / 5) * 5;
+      let cobrado = 0;
+      if (!cc) cobrado = importe;
+      else if (c.id !== CLIENTE_MOROSO) {
+        const abierto = c.id === CLIENTE_EXCEDIDO ? fecha >= '2026-01-25' : fecha >= '2026-02-15';
+        if (!abierto) cobrado = cobro < 0.85 ? importe : Math.round((importe * (0.3 + parte * 0.4)) / 5) * 5;
+        else if (cobro < 0.2) cobrado = Math.round((importe * (0.3 + parte * 0.4)) / 5) * 5;
+      }
+      bruto.push({ tipo: c.tipo_comprobante, cliente_id: c.id, fecha, vencimiento: sumarDias(fecha, c.plazo_dias), importe, cobrado, acreditado: 0 });
+    }
+  }
+  const siguiente: Record<'A' | 'B', number> = { A: PRIMER_NUMERO.A, B: PRIMER_NUMERO.B };
+  const facturas: Factura[] = bruto.map((f, i) => {
+    const factura: Factura = { ...f, id: `fac_${String(i + 1).padStart(4, '0')}`, numero: numeroComprobante(siguiente[f.tipo]++), estado: 'emitida' };
+    factura.estado = estadoDeFactura(factura);
+    return factura;
+  });
+
+  // Notas de crédito previas: dos totales (facturas sin cobros, que quedan anuladas) y una parcial.
+  const notasCredito: NotaCredito[] = [];
+  const siguienteNc: Record<'A' | 'B', number> = { A: PRIMER_NUMERO_NC.A, B: PRIMER_NUMERO_NC.B };
+  const acreditar = (f: Factura | undefined, importe: number, fecha: string, motivo: string): void => {
+    if (!f) return;
+    f.acreditado += importe;
+    f.estado = estadoDeFactura(f);
+    notasCredito.push({ id: `nc_${String(notasCredito.length + 1).padStart(4, '0')}`, numero: numeroComprobante(siguienteNc[f.tipo]++), tipo: f.tipo, factura_id: f.id, fecha, importe, motivo });
+  };
+  const sinCobro = (cliente: string, desde: string): Factura | undefined => facturas.find((f) => f.cliente_id === cliente && f.fecha >= desde && f.cobrado === 0 && f.acreditado === 0);
+  const anulada1 = sinCobro('cli_02', '2026-02-01');
+  const anulada2 = sinCobro('cli_11', '2026-02-10');
+  const parcial = sinCobro('cli_09', '2026-02-20');
+  acreditar(anulada1, anulada1?.importe ?? 0, anulada1 ? sumarDias(anulada1.fecha, 2) : HOY, 'Error de facturación: cliente equivocado');
+  acreditar(anulada2, anulada2?.importe ?? 0, anulada2 ? sumarDias(anulada2.fecha, 3) : HOY, 'Pedido cancelado antes de la entrega');
+  acreditar(parcial, parcial ? Math.round(parcial.importe / 10 / 5) * 5 : 0, parcial ? sumarDias(parcial.fecha, 5) : HOY, 'Bonificación acordada');
+  return { clientes: CLIENTES.map((c) => ({ ...c })), facturas, notasCredito };
 }
 
 export { sumarDias };

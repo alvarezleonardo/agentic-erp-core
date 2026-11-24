@@ -17,7 +17,7 @@ La demo cuenta una idea: el modelo propone, pero no escribe ni pone montos; la p
 
 Un agente que lee tu ERP es fácil; uno en el que se pueda confiar para mover dinero, no. Los principios de [ADR-001](docs/adr/ADR-001-principios.md) lo resuelven con mecanismos y pruebas, no con confianza en el modelo: las escrituras se parten en `preparar_*` y `confirmar_*` y solo la persona confirma, los montos los pone el servidor, el modelo nunca ve el token ni la credencial de confirmación, y toda corrida termina en una directiva final. Con [ADR-002](docs/adr/ADR-002-un-orquestador.md), la cobertura de un ERP completo sale de un orquestador con agentes de dominio acotados, no de un enjambre que se delega trabajo entre sí.
 
-*English summary:* a TypeScript framework to add an agent layer on top of any ERP exposed through MCP. One orchestrator with scoped agents (at most 15 tools each, never a swarm), a hybrid rules+LLM router, and a hard propose/confirm split: the model only calls `preparar_*` tools, the server computes every amount, confirmation tokens and supervisor credentials never reach the model, and every run ends in `render_ui`, `clarify` or `report_error`. Supervisor step-up (credential and reason) travels from the screen to the server, never through the model. Ships with a synthetic ERP (sales, stock, purchases, cash), a terminal demo (`npm run demo`, offline, scripted LLM), a golden eval set (31 phrases) that runs offline with a scripted LLM and can also run against a real model with a spend cap, and security tests. Status: v0.1.2, MIT. Docs are in Spanish.
+*English summary:* a TypeScript framework to add an agent layer on top of any ERP exposed through MCP. One orchestrator with scoped agents (at most 15 tools each, never a swarm), a hybrid rules+LLM router, and a hard propose/confirm split: the model only calls `preparar_*` tools, the server computes every amount, confirmation tokens and supervisor credentials never reach the model, and every run ends in `render_ui`, `clarify` or `report_error`. Supervisor step-up (credential and reason) travels from the screen to the server, never through the model. Ships with a synthetic ERP (sales, stock, purchases, cash, invoicing), a terminal demo (`npm run demo`, offline, scripted LLM), a golden eval set (38 phrases) that runs offline with a scripted LLM and can also run against a real model with a spend cap, and security tests. Status: v0.1.2, MIT. Docs are in Spanish.
 
 ## Qué resuelve
 
@@ -55,7 +55,7 @@ flowchart TB
     P([Persona]) -->|texto| S[Superficie]
     S -->|user.input / ui.action| O[Orquestador]
     O --> R{Router<br/>reglas + LLM}
-    R --> A[Agentes de dominio<br/>ventas, stock, compras, caja]
+    R --> A[Agentes de dominio<br/>ventas, stock, compras, caja, facturación]
     A -->|tools de lectura y preparar_*| H[Herramientas<br/>inyecta contexto e idempotencia]
     H -->|MCP| E[(Servidor MCP del ERP<br/>fuente de verdad)]
     A -->|directiva final| C[Compositor<br/>hidrata montos desde el servidor]
@@ -70,7 +70,7 @@ El modelo ve únicamente el camino superior. La flecha de confirmación sale de 
 
 ## Agentes por área
 
-Cada área (ventas, stock, compras, caja) es un agente con su propia carpeta, su playbook en Markdown y su página con frases de ejemplo que los evals verifican. Ver [docs/agentes](docs/agentes/README.md), que incluye cómo sumar un área.
+Cada área (ventas, stock, compras, caja, facturación) es un agente con su propia carpeta, su playbook en Markdown y su página con frases de ejemplo que los evals verifican. Ver [docs/agentes](docs/agentes/README.md), que incluye cómo sumar un área.
 
 ## Estructura
 
@@ -81,9 +81,9 @@ packages/
   mcp-contract/  tipos, JSON Schema, verificación de conformidad, kit de servidor (token, idempotencia, credencial) y CONTRACT.md
   mcp-client/    cliente MCP (stdio, HTTP, en memoria) y cliente compuesto
 contracts/genui/ componentes genéricos versionados (JSON Schema)
-examples/erp-sintetico/  ERP determinista (ventas, stock, compras, caja) + reglas del router
+examples/erp-sintetico/  ERP determinista (ventas, stock, compras, caja, facturación) + reglas del router
   src/agentes/<área>/    un agente por carpeta: agente.ts y playbook.md (el prompt)
-evals/           31 frases doradas, runner y reporte
+evals/           38 frases doradas, runner y reporte
 tests/           pruebas de seguridad de punta a punta
 docs/adr/        decisiones de diseño
 docs/agentes/    catálogo de agentes por área, con frases de ejemplo probadas por los evals
@@ -97,7 +97,7 @@ Requiere Node 22 o superior.
 npm install
 npm run check        # typecheck + tests + evals
 npm run demo         # egreso de caja con credencial de supervisor, offline
-npm run eval         # 31 frases con ScriptedProvider, sin red ni claves
+npm run eval         # 38 frases con ScriptedProvider, sin red ni claves
 npm run ejemplo:servidor   # el ERP sintético como servidor MCP por stdio
 ```
 
@@ -154,17 +154,17 @@ Tres trazas completas (camino feliz, credencial incorrecta y reintento) en [`doc
 
 - Pruebas unitarias y de integración por paquete.
 - `tests/seguridad.test.ts`: el modelo nunca recibe token ni credencial de confirmación (ni el nombre del campo), los montos salen del servidor, el modelo no puede confirmar, y el token y la credencial de confirmación no quedan en las trazas.
-- Evals dorados: 31 frases con plan del router, tools usadas y componente esperado; corren offline y son parte de `npm run check`.
+- Evals dorados: 38 frases con plan del router, tools usadas y componente esperado; corren offline y son parte de `npm run check`.
 
 ## Resultados de evals
 
-Los evals dorados (31 frases) se corren con `npm run eval` y escriben `evals/reportes/ultimo.md` (ignorado por git).
+Los evals dorados (38 frases) se corren con `npm run eval` y escriben `evals/reportes/ultimo.md` (ignorado por git).
 
 | Modelo | Aciertos del router | Plan correcto | Componente correcto | Costo de la corrida | Fecha |
 |---|---|---|---|---|---|
 | ScriptedProvider (offline, guionado) | 31/31 | 31/31 | 31/31 | USD 0 | 13/11/2026 |
 
-Cómo leerla (cada columna cuenta frases sobre 31; el reporte también informa tools correctas y tokens de entrada y salida):
+Cómo leerla (cada columna cuenta frases sobre 38; el reporte también informa tools correctas y tokens de entrada y salida):
 
 - **Aciertos del router**: el origen de la clasificación (reglas, modelo o sin clasificar) coincide con el esperado.
 - **Plan correcto**: la lista de dominios que arma el router coincide con la esperada, en orden.
