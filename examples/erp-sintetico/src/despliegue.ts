@@ -51,6 +51,8 @@ export async function crearDespliegue(o: OpcionesDespliegue): Promise<Despliegue
     permisos: permisosDelEjemplo(),
     trace,
     reloj,
+    // Modo directo (`user.input` con `comando`): con qué componente se muestra cada lectura de gestión, que no pasa por el modelo.
+    componentesPorTool: { cierre_del_dia: 'DetailCard', resumen_gestion: 'KpiTiles', alertas_del_dia: 'DataTable' },
     contextoDelNegocio: () => `FECHA DE REFERENCIA DEL NEGOCIO: hoy es ${HOY} (martes). Moneda: USD. Hay datos desde 2026-01-01.`,
     ...o.orquestador,
   });

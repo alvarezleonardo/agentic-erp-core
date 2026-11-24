@@ -137,6 +137,20 @@
     { "id": "pre-06", "texto": "subí 5 % el escritorio en la lista minorista", "rol": "supervisor", "esperado": { "origen": "reglas", "plan": ["precios"], "tools": ["buscar_articulos"], "componente": "Clarification" },
       "guion": [ { "llamar": "buscar_articulos", "args": { "texto": "escritorio" } }, { "final": "clarify", "pregunta": "¿De cuál artículo querés subir el precio?", "opciones_desde": "articulo_id" } ] },
     { "id": "pre-07", "texto": "a cuánto sale cada cosa para los revendedores", "rol": "gerente", "esperado": { "origen": "llm", "plan": ["precios"], "tools": ["listar_precios"], "componente": "DataTable" },
-      "guion": [ { "router": ["precios"] }, { "llamar": "listar_precios", "args": { "lista": "Distribuidores" } }, { "final": "render_ui", "component": "DataTable" } ] }
+      "guion": [ { "router": ["precios"] }, { "llamar": "listar_precios", "args": { "lista": "Distribuidores" } }, { "final": "render_ui", "component": "DataTable" } ] },
+    { "id": "ges-01", "texto": "cómo cerró el día", "rol": "gerente", "esperado": { "origen": "reglas", "plan": ["gestion"], "tools": ["cierre_del_dia"], "componente": "DetailCard" },
+      "guion": [ { "llamar": "cierre_del_dia", "args": {} }, { "final": "render_ui", "component": "DetailCard" } ] },
+    { "id": "ges-02", "texto": "cómo cerramos ayer", "rol": "supervisor", "esperado": { "origen": "reglas", "plan": ["gestion"], "tools": ["cierre_del_dia"], "componente": "DetailCard" },
+      "guion": [ { "llamar": "cierre_del_dia", "args": { "fecha": "2026-03-30" } }, { "final": "render_ui", "component": "DetailCard" } ] },
+    { "id": "ges-03", "texto": "resumen del mes", "rol": "gerente", "esperado": { "origen": "reglas", "plan": ["gestion"], "tools": ["resumen_gestion"], "componente": "KpiTiles" },
+      "guion": [ { "llamar": "resumen_gestion", "args": {} }, { "final": "render_ui", "component": "KpiTiles" } ] },
+    { "id": "ges-04", "texto": "qué tengo que mirar hoy", "rol": "gerente", "esperado": { "origen": "reglas", "plan": ["gestion"], "tools": ["alertas_del_dia"], "componente": "DataTable" },
+      "guion": [ { "llamar": "alertas_del_dia", "args": {} }, { "final": "render_ui", "component": "DataTable" } ] },
+    { "id": "ges-05", "texto": "hay alguna alerta", "rol": "operador", "esperado": { "origen": "reglas", "plan": ["gestion"], "tools": ["alertas_del_dia"], "componente": "DataTable" },
+      "guion": [ { "llamar": "alertas_del_dia", "args": {} }, { "final": "render_ui", "component": "DataTable" } ] },
+    { "id": "ges-06", "texto": "cómo cerró el día 5 de abril", "rol": "gerente", "esperado": { "origen": "reglas", "plan": ["gestion"], "tools": ["cierre_del_dia"], "componente": "ErrorNotice" },
+      "guion": [ { "llamar": "cierre_del_dia", "args": { "fecha": "2026-04-05" } }, { "final": "report_error", "codigo": "PARAMETRO_INVALIDO", "mensaje": "No hay datos para esa fecha: el ejemplo llega hasta el 31 de marzo." } ] },
+    { "id": "ges-07", "texto": "cómo viene el negocio", "rol": "gerente", "esperado": { "origen": "llm", "plan": ["gestion"], "tools": ["resumen_gestion"], "componente": "KpiTiles" },
+      "guion": [ { "router": ["gestion"] }, { "llamar": "resumen_gestion", "args": {} }, { "final": "render_ui", "component": "KpiTiles" } ] }
   ]
 }

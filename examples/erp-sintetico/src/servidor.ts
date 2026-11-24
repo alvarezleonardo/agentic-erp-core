@@ -347,6 +347,25 @@ export const TOOLS: DefTool[] = [
     manejar: (a, c, erp) => ({ ...erp.prepararCambioPrecio(a, c) }),
   },
   { nombre: 'confirmar_cambio_precio', descripcion: 'Confirma un cambio de precios preparado. Lo llama el orquestador tras el toque de la persona.', esquema: confirmarEsquema(), manejar: async (a, c, erp) => ({ ...(await erp.confirmar('cambio_precio', a, c)) }) },
+  // ---- gestión del día (solo lectura)
+  {
+    nombre: 'cierre_del_dia',
+    descripcion: 'Cierre de un día (por defecto hoy): ventas contra el mismo día de la semana anterior, caja con su arqueo y diferencia, cobranzas y pagos del día, saldos bancarios y la lista de pendientes para mañana. Todo calculado por el servidor.',
+    esquema: entrada({ fecha: FECHA }),
+    manejar: (a, _c, erp) => ({ ...erp.cierreDelDia(a) }),
+  },
+  {
+    nombre: 'resumen_gestion',
+    descripcion: 'Indicadores de gestión de un período (por defecto el mes en curso): ventas y margen, facturado, cobrado, pagado, deuda vencida de clientes y con proveedores, y la posición de tesorería por moneda. Con la comparación contra el período anterior cuando corresponde.',
+    esquema: entrada({ desde: FECHA, hasta: FECHA }),
+    manejar: (a, _c, erp) => ({ ...erp.resumenGestion(a) }),
+  },
+  {
+    nombre: 'alertas_del_dia',
+    descripcion: 'Lista priorizada (alta, media, baja) de lo que hay que mirar hoy: anomalías de ventas y caja, depósitos sin acreditar o con diferencia, facturas de proveedor por vencer, clientes excedidos o con deuda vieja, artículos bajo el mínimo y márgenes bajos. Cada alerta dice por qué y qué área la resuelve.',
+    esquema: entrada({}),
+    manejar: (_a, _c, erp) => ({ ...erp.alertasDelDia() }),
+  },
 ];
 
 export const toolsMcp = (): ToolMcp[] => TOOLS.map((t) => ({ nombre: t.nombre, descripcion: t.descripcion, esquema: t.esquema }));

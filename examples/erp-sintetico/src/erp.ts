@@ -34,7 +34,7 @@ import {
   type ValorMetrica,
 } from '@agentic-erp/mcp-contract';
 import { ANOMALIA_CAJA, HOY, LISTA_MINORISTA, redondear5, INICIO_DATOS, MONEDA, VENTANA_ACREDITACION_DIAS, estadoDeFactura, estadoDeFacturaProveedor, generarDatos, saldoDeCuenta, saldoDeFactura, saldoDeFacturaProveedor, type Articulo, type Cliente, type Cobranza, type CambioPrecio, type CuentaBancaria, type DatosErp, type ListaPrecios, type Factura, type FacturaProveedor, type MedioCobro, type MedioPago, type MovimientoBancario, type MovimientoCaja, type TipoMovimientoBancario, type TransferenciaInterna, type NotaCredito, type OrdenCompra, type PagoProveedor, type Proveedor } from './datos.js';
-import { diaDeSemana, diasEntre, esFecha, rango, sumarDias } from './fechas.js';
+import { NOMBRES_DIA, diaDeSemana, diasEntre, esFecha, rango, sumarDias } from './fechas.js';
 import { ROLES_AUTORIZADORES, ROLES_POR_ESCRITURA } from './permisos.js';
 
 /** Error de negocio con código del contrato. El servidor MCP lo convierte en `isError`. */
@@ -162,11 +162,45 @@ const fmtEn = (centavos: number, moneda: string): string => {
   return `${d.monto} ${d.moneda}`;
 };
 
+/** Una alerta del día: lo que detectan las otras áreas, con el porqué y qué área la resuelve. */
+interface AlertaGestion {
+  id: string;
+  prioridad: 'alta' | 'media' | 'baja';
+  titulo: string;
+  por_que: string;
+  area: string;
+  referencia: string;
+}
+
+/** Cómo se llama cada área en la tabla de alertas (la persona sabe a quién pedirle qué). */
+const NOMBRE_AREA: Record<string, string> = { ventas: 'Ventas', caja: 'Caja', tesoreria: 'Tesorería y bancos', pagos: 'Pagos a proveedores', cobranzas: 'Clientes y cobranzas', compras: 'Compras', precios: 'Precios y listas' };
+const ORDEN_PRIORIDAD = { alta: 0, media: 1, baja: 2 } as const;
+/** Ventana de las anomalías que entran en las alertas: los últimos N días contando hoy. */
+const DIAS_ANOMALIAS_ALERTA = 14;
+/** Una factura de proveedor entra en las alertas cuando vence dentro de estos días. */
+const DIAS_VENCIMIENTO_ALERTA = 3;
+/** Antigüedad (días desde la emisión) desde la que la deuda vencida de un cliente es alerta. */
+const DIAS_DEUDA_CLIENTE_ALERTA = 60;
+/** Cuántas alertas de prioridad alta o media lista el cierre del día como pendientes. */
+const MAX_PENDIENTES_CIERRE = 15;
+
 /** Resultado de cruzar un depósito de caja con el extracto: ver `conciliarDepositos`. */
 interface DepositoConciliado {
   deposito: MovimientoCaja;
   credito: MovimientoBancario | undefined;
   estado: 'conciliado' | 'con_diferencia' | 'pendiente';
+}
+
+/** Un indicador de moneda (USD) o cantidad con su comparación contra el período anterior, si hay con qué comparar. Lo usan facturación y la gestión. */
+function kpiConComparacion(id: string, etiqueta: string, tipo: 'moneda' | 'cantidad', valor: number, anterior: number | undefined, sentido: KpiMetrica['sentido_favorable'], periodoAnterior: string): KpiMetrica {
+  const v = (x: number): ValorMetrica => (tipo === 'moneda' ? { tipo: 'moneda', valor: dinero(x).monto, moneda: MONEDA } : { tipo: 'cantidad', valor: String(x) });
+  const k: KpiMetrica = { id, etiqueta, valor: v(valor), sentido_favorable: sentido };
+  if (anterior !== undefined && anterior !== 0) {
+    const pct = ((valor - anterior) / Math.abs(anterior)) * 100;
+    k.comparacion = { variacion_pct: pct.toFixed(1), periodo_anterior: periodoAnterior, valor_anterior: v(anterior) };
+    k.tendencia = pct > 2 ? 'sube' : pct < -2 ? 'baja' : 'estable';
+  }
+  return k;
 }
 
 /** Porcentaje tal como lo escribe una persona: «8», «-12.5», «8,5 %». Devuelve centésimas de punto (800 es 8 %). */
@@ -870,16 +904,7 @@ export class ErpSintetico {
       const antHasta = sumarDias(desde, -1);
       const actual = this.cifrasFacturacion(desde, hasta);
       const previo = antDesde >= INICIO_DATOS ? this.cifrasFacturacion(antDesde, antHasta) : undefined;
-      const kpi = (id: string, etiqueta: string, tipo: 'moneda' | 'cantidad', valor: number, anterior: number | undefined, sentido: KpiMetrica['sentido_favorable']): KpiMetrica => {
-        const v = (x: number): ValorMetrica => (tipo === 'moneda' ? { tipo: 'moneda', valor: dinero(x).monto, moneda: MONEDA } : { tipo: 'cantidad', valor: String(x) });
-        const k: KpiMetrica = { id, etiqueta, valor: v(valor), sentido_favorable: sentido };
-        if (anterior !== undefined && anterior !== 0) {
-          const pct = ((valor - anterior) / Math.abs(anterior)) * 100;
-          k.comparacion = { variacion_pct: pct.toFixed(1), periodo_anterior: `${antDesde} a ${antHasta}`, valor_anterior: v(anterior) };
-          k.tendencia = pct > 2 ? 'sube' : pct < -2 ? 'baja' : 'estable';
-        }
-        return k;
-      };
+      const kpi = (id: string, etiqueta: string, tipo: 'moneda' | 'cantidad', valor: number, anterior: number | undefined, sentido: KpiMetrica['sentido_favorable']): KpiMetrica => kpiConComparacion(id, etiqueta, tipo, valor, anterior, sentido, `${antDesde} a ${antHasta}`);
       return {
         periodo: { desde, hasta, etiqueta: `${desde} a ${hasta}` },
         kpis: [
@@ -1485,6 +1510,164 @@ export class ErpSintetico {
       columnas: this.columnasPrecios(),
       filas: hallados.map((r) => this.filaPrecio(r.l, r.x, minimoBp)),
       total_filas: hallados.length,
+    };
+  }
+
+  // ------------------------------------------------------------------ gestión del día (solo lectura, junta lo de las otras áreas)
+
+  /** Saldo de una cuenta bancaria con los movimientos hasta una fecha inclusive. */
+  private saldoCuentaAl(c: CuentaBancaria, fecha: string): number {
+    return saldoDeCuenta(c, this.datos.movimientosBancarios.filter((m) => m.fecha <= fecha));
+  }
+
+  private totalDeVentas(fecha: string): number {
+    return sumarCentavos(this.ventasEntre(fecha, fecha).map((v) => v.ingresos));
+  }
+
+  /**
+   * Todo lo que hoy requiere atención, juntando lo que ya calculan las otras áreas (sin recalcularlo: se llama a sus propias funciones).
+   * Prioridad alta: faltante de caja o caída de ventas grandes, depósito con diferencia, facturas de proveedor vencidas o que vencen hoy,
+   * factura duplicada, cliente excedido del límite, artículo bajo el costo o sin stock. Media: lo que vence en los próximos días,
+   * la deuda de clientes de más de 60 días, depósitos sin acreditar fuera de la ventana, artículos bajo el mínimo y márgenes bajos.
+   * Baja: un depósito sin acreditar que todavía está dentro de la ventana de acreditación. Ordenadas por prioridad.
+   */
+  private alertasGestion(): AlertaGestion[] {
+    const out: AlertaGestion[] = [];
+    for (const a of this.detectarAnomalias(sumarDias(HOY, -(DIAS_ANOMALIAS_ALERTA - 1)), HOY).anomalias) {
+      out.push({ id: a.id, prioridad: a.severidad, titulo: `${a.titulo} del ${a.fecha ?? ''}`.trim(), por_que: `${a.por_que} Observado ${a.observado}, esperado ${a.esperado}.`, area: a.id.startsWith('anom_caja_') ? 'caja' : 'ventas', referencia: a.fecha ?? a.id });
+    }
+    for (const x of this.cruzarDepositos()) {
+      const d = x.deposito;
+      if (x.estado === 'con_diferencia' && x.credito) {
+        out.push({ id: `alerta_deposito_${d.id}`, prioridad: 'alta', titulo: `Depósito del ${d.fecha} acreditado con diferencia`, por_que: `En caja salió ${fmt(d.importe)} y el banco acreditó ${fmt(x.credito.importe)}: diferencia de ${fmt(x.credito.importe - d.importe)}.`, area: 'tesoreria', referencia: d.id });
+      } else if (x.estado === 'pendiente') {
+        const fuera = HOY > sumarDias(d.fecha, VENTANA_ACREDITACION_DIAS);
+        out.push({ id: `alerta_deposito_${d.id}`, prioridad: fuera ? 'media' : 'baja', titulo: `Depósito del ${d.fecha} sin acreditar`, por_que: fuera ? `Salió de caja por ${fmt(d.importe)} y pasaron más de ${VENTANA_ACREDITACION_DIAS} días sin que el banco lo acredite.` : `Salió de caja por ${fmt(d.importe)} y todavía está dentro de los ${VENTANA_ACREDITACION_DIAS} días de acreditación.`, area: 'tesoreria', referencia: d.id });
+      }
+    }
+    const abiertas = this.cuentasAbiertas();
+    const vencidas = abiertas.filter((f) => f.vencimiento < HOY);
+    if (vencidas.length > 0) {
+      out.push({ id: 'alerta_facturas_proveedor_vencidas', prioridad: 'alta', titulo: `${vencidas.length} ${vencidas.length === 1 ? 'factura de proveedor vencida' : 'facturas de proveedores vencidas'} sin pagar`, por_que: `Suman ${fmt(sumarCentavos(vencidas.map((f) => saldoDeFacturaProveedor(f))))} y la más vieja venció el ${vencidas.map((f) => f.vencimiento).sort()[0]}.`, area: 'pagos', referencia: vencidas.map((f) => f.numero).join(', ') });
+    }
+    for (const f of abiertas.filter((x) => x.vencimiento >= HOY && x.vencimiento <= sumarDias(HOY, DIAS_VENCIMIENTO_ALERTA))) {
+      const dias = diasEntre(HOY, f.vencimiento) - 1;
+      out.push({ id: `alerta_vencimiento_${f.id}`, prioridad: dias === 0 ? 'alta' : 'media', titulo: `${dias === 0 ? 'Vence hoy' : `Vence el ${f.vencimiento}`} la factura ${f.numero} de ${this.nombreProveedor(f.proveedor_id)}`, por_que: `Saldo de ${fmt(saldoDeFacturaProveedor(f))}; ${dias === 0 ? 'vence hoy' : `vence en ${dias} ${dias === 1 ? 'día' : 'días'}`}.`, area: 'pagos', referencia: f.numero });
+    }
+    for (const f of abiertas) {
+      const otras = this.duplicadasDe(f);
+      if (otras.length > 0 && otras.every((o) => f.id < o.id)) {
+        out.push({ id: `alerta_duplicada_${f.id}`, prioridad: 'alta', titulo: `Posible factura duplicada ${f.numero} de ${this.nombreProveedor(f.proveedor_id)}`, por_que: `Hay otra factura abierta del mismo proveedor con el mismo número e importe (${fmt(f.importe)}): casi seguro una carga doble.`, area: 'pagos', referencia: [f, ...otras].map((x) => x.id).join(' y ') });
+      }
+    }
+    for (const c of this.datos.clientes.filter((x) => this.estadoCliente(x) === 'limite_excedido')) {
+      const saldo = this.saldoCliente(c.id);
+      out.push({ id: `alerta_limite_${c.id}`, prioridad: 'alta', titulo: `${c.nombre} excedió su límite de crédito`, por_que: `Debe ${fmt(saldo)} y su límite es ${fmt(c.limite_credito)}: lo excede en ${fmt(saldo - c.limite_credito)}.`, area: 'cobranzas', referencia: c.id });
+    }
+    for (const f of this.listarDeudores({ antiguedad_minima: DIAS_DEUDA_CLIENTE_ALERTA }).filas) {
+      const saldo = f['saldo_vencido'] as Dinero;
+      out.push({ id: `alerta_deuda_${String(f['cliente_id'])}`, prioridad: 'media', titulo: `${String(f['cliente'])} tiene deuda vencida de más de ${DIAS_DEUDA_CLIENTE_ALERTA} días`, por_que: `${saldo.monto} ${saldo.moneda} vencidos de más de ${DIAS_DEUDA_CLIENTE_ALERTA} días desde la emisión; la factura más vieja tiene ${String(f['antiguedad_maxima'])} días.`, area: 'cobranzas', referencia: String(f['cliente_id']) });
+    }
+    const bajo = this.datos.articulos.filter((a) => a.existencia < a.minimo);
+    if (bajo.length > 0) {
+      const sinStock = bajo.filter((a) => a.existencia === 0).length;
+      out.push({ id: 'alerta_stock_bajo_minimo', prioridad: sinStock > 0 ? 'alta' : 'media', titulo: `${bajo.length} ${bajo.length === 1 ? 'artículo bajo el mínimo' : 'artículos bajo el mínimo'}${sinStock > 0 ? `, ${sinStock} sin stock` : ''}`, por_que: 'La existencia es menor al mínimo configurado de cada artículo; conviene reponer.', area: 'compras', referencia: bajo.map((a) => a.id).join(', ') });
+    }
+    for (const f of this.articulosMargenBajo({}).filas) {
+      const precio = f['precio'] as Dinero;
+      const costo = f['costo'] as Dinero;
+      const bajoCosto = f['estado'] === 'bajo_costo';
+      out.push({ id: `alerta_margen_${String(f['articulo_id'])}_${String(f['lista'])}`, prioridad: bajoCosto ? 'alta' : 'media', titulo: `${String(f['nombre'])} en ${String(f['lista'])}: ${bajoCosto ? 'precio bajo el costo' : 'margen bajo'}`, por_que: bajoCosto ? `El precio de ${precio.monto} ${precio.moneda} es menor que el costo de ${costo.monto} ${costo.moneda}.` : `El margen de ${String(f['margen_pct'])} % está por debajo del mínimo de ${textoPct(this.margenMinimoBp)} %.`, area: 'precios', referencia: String(f['articulo_id']) });
+    }
+    return out.sort((x, y) => ORDEN_PRIORIDAD[x.prioridad] - ORDEN_PRIORIDAD[y.prioridad]);
+  }
+
+  /** Lista priorizada de lo que hay que mirar hoy, con el porqué de cada alerta y el área que la resuelve. */
+  alertasDelDia(): SalidaTabla {
+    const alertas = this.alertasGestion();
+    const n = (p: AlertaGestion['prioridad']): number => alertas.filter((a) => a.prioridad === p).length;
+    return {
+      titulo: `Alertas al ${HOY}: ${alertas.length} (${n('alta')} altas, ${n('media')} medias, ${n('baja')} bajas)`,
+      columnas: [
+        { id: 'prioridad', etiqueta: 'Prioridad', tipo: 'estado' },
+        { id: 'alerta', etiqueta: 'Alerta', tipo: 'texto' },
+        { id: 'por_que', etiqueta: 'Por qué', tipo: 'texto' },
+        { id: 'area', etiqueta: 'Quién la resuelve', tipo: 'texto' },
+        { id: 'referencia', etiqueta: 'Referencia', tipo: 'texto' },
+      ],
+      filas: alertas.map((a) => ({ alerta_id: a.id, prioridad: a.prioridad, alerta: a.titulo, por_que: a.por_que, area: NOMBRE_AREA[a.area] ?? a.area, referencia: a.referencia })),
+      total_filas: alertas.length,
+    };
+  }
+
+  /**
+   * Cierre de un día (por defecto hoy): ventas contra el mismo día de la semana anterior, caja con su arqueo, cobros y pagos del día,
+   * saldos bancarios a esa fecha y los pendientes para mañana (las alertas de prioridad alta y media, con el estado de hoy).
+   */
+  cierreDelDia(a: Obj): SalidaDetalle {
+    const fecha = this.fechaCaja(a['fecha']);
+    const ventas = this.totalDeVentas(fecha);
+    const unidades = this.ventasEntre(fecha, fecha).reduce((s, v) => s + v.unidades, 0);
+    const previa = sumarDias(fecha, -7);
+    const campos: SalidaDetalle['campos'] = [{ etiqueta: 'Ventas del día', valor: `${fmt(ventas)} en ${unidades} unidades` }];
+    if (previa >= INICIO_DATOS) {
+      const antes = this.totalDeVentas(previa);
+      campos.push({ etiqueta: `Mismo día de la semana anterior (${previa})`, valor: fmt(antes) });
+      campos.push({ etiqueta: 'Variación de ventas', valor: antes === 0 ? 'Sin base de comparación' : `${(((ventas - antes) / antes) * 100).toFixed(1)} %` });
+    } else campos.push({ etiqueta: 'Mismo día de la semana anterior', valor: 'Sin datos anteriores' });
+
+    const caja = this.cajaDelDia(fecha);
+    campos.push({ etiqueta: 'Caja: apertura', valor: fmt(caja.apertura) }, { etiqueta: 'Caja: ingresos', valor: fmt(caja.ingresos) }, { etiqueta: 'Caja: egresos', valor: fmt(caja.egresos) }, { etiqueta: 'Caja: saldo esperado', valor: fmt(caja.esperado) });
+    if (caja.contado === undefined) campos.push({ etiqueta: 'Caja: arqueo', valor: 'Pendiente, la caja sigue abierta' });
+    else campos.push({ etiqueta: 'Caja: contado en el arqueo', valor: fmt(caja.contado) }, { etiqueta: 'Caja: diferencia', valor: `${fmt(caja.contado - caja.esperado)}${caja.contado === caja.esperado ? ' (cuadra)' : ''}` });
+
+    const cobros = this.datos.cobranzas.filter((c) => c.fecha === fecha);
+    campos.push({ etiqueta: 'Cobranzas del día', valor: cobros.length === 0 ? 'Ninguna' : `${cobros.length} por ${fmt(sumarCentavos(cobros.map((c) => c.importe)))}` });
+    const pagos = this.datos.pagosProveedor.filter((p) => p.fecha === fecha);
+    const sinDebitar = pagos.filter((p) => p.estado_bancario === 'pendiente_debito');
+    campos.push({ etiqueta: 'Pagos a proveedores del día', valor: pagos.length === 0 ? 'Ninguno' : `${pagos.length} por ${fmt(sumarCentavos(pagos.map((p) => p.importe)))}${sinDebitar.length ? `, ${sinDebitar.length} pendientes de débito bancario` : ''}` });
+    for (const c of this.datos.cuentasBancarias) campos.push({ etiqueta: `Banco: ${c.nombre}`, valor: fmtEn(this.saldoCuentaAl(c, fecha), c.moneda) });
+
+    const urgentes = this.alertasGestion().filter((x) => x.prioridad !== 'baja');
+    const pendientes: string[] = [];
+    if (fecha === HOY && caja.contado === undefined) pendientes.push('Caja: hacer el arqueo del día');
+    for (const x of urgentes.slice(0, MAX_PENDIENTES_CIERRE)) pendientes.push(`${NOMBRE_AREA[x.area] ?? x.area}: ${x.titulo} (${x.prioridad})`);
+    const total = pendientes.length + Math.max(0, urgentes.length - MAX_PENDIENTES_CIERRE);
+    campos.push({ etiqueta: `Pendientes para mañana (estado al ${HOY})`, valor: total === 0 ? 'Ninguno' : String(total) });
+    pendientes.forEach((p, i) => campos.push({ etiqueta: `Pendiente ${i + 1}`, valor: p }));
+    if (urgentes.length > MAX_PENDIENTES_CIERRE) campos.push({ etiqueta: 'Y más', valor: `${urgentes.length - MAX_PENDIENTES_CIERRE} ${urgentes.length - MAX_PENDIENTES_CIERRE === 1 ? 'pendiente más' : 'pendientes más'} en las alertas del día` });
+    return { titulo: `Cierre del ${NOMBRES_DIA[diaDeSemana(fecha)]} ${fecha}`, campos };
+  }
+
+  /** Indicadores del negocio en un período (por defecto el mes en curso hasta hoy): reutiliza los cálculos de ventas, facturación y tesorería. */
+  resumenGestion(a: Obj): SalidaMetricas {
+    const desde = a['desde'] === undefined ? `${HOY.slice(0, 8)}01` : fechaValida(a['desde'], 'desde');
+    const hasta = a['hasta'] === undefined ? HOY : fechaValida(a['hasta'], 'hasta');
+    if (desde > hasta) throw new ErrorErp('PARAMETRO_INVALIDO', 'desde no puede ser posterior a hasta.');
+    const n = diasEntre(desde, hasta);
+    const antDesde = sumarDias(desde, -n);
+    const antHasta = sumarDias(desde, -1);
+    const hayAnterior = antDesde >= INICIO_DATOS;
+    const periodoAnterior = `${antDesde} a ${antHasta}`;
+    const cobrado = (d: string, h: string): number => sumarCentavos(this.datos.cobranzas.filter((c) => c.fecha >= d && c.fecha <= h).map((c) => c.importe));
+    const pagado = (d: string, h: string): number => sumarCentavos(this.datos.pagosProveedor.filter((p) => p.fecha >= d && p.fecha <= h).map((p) => p.importe));
+    const ventasYMargen = this.consultarMetrica(['ventas_total', 'margen_bruto_pct'], desde, hasta, true).kpis;
+    const facturado = (this.resumenFacturacion(desde, hasta, undefined) as SalidaMetricas).kpis.filter((k) => k.id === 'facturado_total');
+    const posicion = this.posicionTesoreria().kpis.filter((k) => k.id === 'disponible' || k.id === 'bancos_ars');
+    const vencidoClientes = sumarCentavos(this.datos.facturas.filter((f) => this.vencida(f)).map((f) => saldoDeFactura(f)));
+    const vencidoProveedores = sumarCentavos(this.cuentasAbiertas().filter((f) => f.vencimiento < HOY).map((f) => saldoDeFacturaProveedor(f)));
+    return {
+      periodo: { desde, hasta, etiqueta: `${desde} a ${hasta}` },
+      kpis: [
+        ...ventasYMargen,
+        ...facturado,
+        kpiConComparacion('cobrado_total', 'Cobrado a clientes', 'moneda', cobrado(desde, hasta), hayAnterior ? cobrado(antDesde, antHasta) : undefined, 'mayor_es_mejor', periodoAnterior),
+        kpiConComparacion('pagado_total', 'Pagado a proveedores', 'moneda', pagado(desde, hasta), hayAnterior ? pagado(antDesde, antHasta) : undefined, 'menor_es_mejor', periodoAnterior),
+        kpiConComparacion('deuda_clientes_vencida', `Deuda vencida de clientes (al ${HOY})`, 'moneda', vencidoClientes, undefined, 'menor_es_mejor', periodoAnterior),
+        kpiConComparacion('deuda_proveedores_vencida', `Deuda vencida con proveedores (al ${HOY})`, 'moneda', vencidoProveedores, undefined, 'menor_es_mejor', periodoAnterior),
+        ...posicion,
+      ],
+      fuente: { origen: 'ERP sintético (datos de ejemplo)', actualizado_en: `${HOY}T08:00:00.000Z` },
     };
   }
 
