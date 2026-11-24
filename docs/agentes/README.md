@@ -15,6 +15,7 @@ Cada área vive en su carpeta, en [`examples/erp-sintetico/src/agentes/`](../../
 | Stock | Existencias, artículos bajo el mínimo, ficha de un artículo y ajustes de inventario | Sí: ajustes de existencia | [playbook](../../examples/erp-sintetico/src/agentes/stock/playbook.md) | [stock](stock.md) |
 | Compras | Proveedores, órdenes de compra y qué reponer | Sí: órdenes de compra | [playbook](../../examples/erp-sintetico/src/agentes/compras/playbook.md) | [compras](compras.md) |
 | Caja | Estado de la caja, movimientos, arqueos y diferencias | Sí: ingresos y egresos | [playbook](../../examples/erp-sintetico/src/agentes/caja/playbook.md) | [caja](caja.md) |
+| Facturación | Clientes, facturas de venta, total facturado y notas de crédito | Sí: notas de crédito | [playbook](../../examples/erp-sintetico/src/agentes/facturacion/playbook.md) | [facturación](facturacion.md) |
 
 Ningún agente escribe por su cuenta. Las tools `preparar_*` solo arman una propuesta; la confirmación (`confirmar_*`) la hace la persona desde la pantalla, y el agente no tiene acceso a ninguna tool de confirmación.
 

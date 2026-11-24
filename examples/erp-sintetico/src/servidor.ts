@@ -161,6 +161,38 @@ export const TOOLS: DefTool[] = [
     manejar: (a, c, erp) => ({ ...erp.prepararMovimientoCaja(a, c) }),
   },
   { nombre: 'confirmar_movimiento_caja', descripcion: 'Confirma un movimiento de caja preparado. Lo llama el orquestador tras el toque de la persona.', esquema: confirmarEsquema(), manejar: async (a, c, erp) => ({ ...(await erp.confirmar('movimiento_caja', a, c)) }) },
+  // ---- facturación
+  {
+    nombre: 'buscar_clientes',
+    descripcion: 'Busca clientes por nombre. Devuelve los códigos (cliente_id) con su condición de pago, límite de crédito y saldo pendiente. Usala antes de filtrar facturas por cliente.',
+    esquema: entrada({ texto: { type: 'string', minLength: 2, description: 'Parte del nombre del cliente.' } }, ['texto']),
+    manejar: (a, _c, erp) => ({ ...erp.buscarClientes(a['texto']) }),
+  },
+  {
+    nombre: 'listar_facturas',
+    descripcion: 'Facturas de venta, filtradas por cliente, período (fecha de emisión) y estado. Con solo_con_saldo trae únicamente las que tienen saldo pendiente. Devuelve importe y saldo de cada una.',
+    esquema: entrada({ cliente_id: { type: 'string' }, desde: FECHA, hasta: FECHA, estado: { enum: ['emitida', 'anulada', 'parcialmente_cobrada', 'cobrada'] }, solo_con_saldo: { type: 'boolean' } }),
+    manejar: (a, _c, erp) => ({ ...erp.listarFacturas(a) }),
+  },
+  {
+    nombre: 'obtener_factura',
+    descripcion: 'Detalle de una factura: cliente, fechas, importe, cobrado, notas de crédito, saldo pendiente y estado. Se la puede pedir por factura_id o por número (por ejemplo 0001-00001234). Devuelve también el factura_id.',
+    esquema: entrada({ factura_id: { type: 'string' }, numero: { type: 'string', description: 'Número del comprobante, por ejemplo 0001-00001234.' } }),
+    manejar: (a, _c, erp) => ({ ...erp.obtenerFactura(a) }),
+  },
+  {
+    nombre: 'resumen_facturacion',
+    descripcion: 'Total facturado en un período. Sin agrupar_por devuelve indicadores (facturado, notas de crédito, neto, comprobantes y saldo pendiente) con la comparación contra el período anterior; con agrupar_por devuelve una tabla por mes, cliente o tipo de comprobante (A o B).',
+    esquema: entrada({ desde: FECHA, hasta: FECHA, agrupar_por: { enum: ['mes', 'cliente', 'tipo'] } }, ['desde', 'hasta']),
+    manejar: (a, _c, erp) => ({ ...erp.resumenFacturacion(a['desde'], a['hasta'], a['agrupar_por']) }),
+  },
+  {
+    nombre: 'preparar_nota_credito',
+    descripcion: 'Prepara una nota de crédito sobre una factura, total (el saldo de la factura) o parcial (con importe). El motivo es obligatorio. El servidor calcula el importe y rechaza facturas anuladas o cobradas por completo. Las notas grandes necesitan la confirmación de un supervisor. No se emite hasta que la persona confirma.',
+    esquema: entrada({ factura_id: { type: 'string' }, motivo: { type: 'string', minLength: 3, maxLength: 120 }, importe: { type: ['string', 'number'], description: 'Solo para una nota parcial: el importe tal como lo dijo la persona, sin símbolo de moneda. Sin importe, la nota es por el saldo completo.' } }, ['factura_id', 'motivo']),
+    manejar: (a, c, erp) => ({ ...erp.prepararNotaCredito(a, c) }),
+  },
+  { nombre: 'confirmar_nota_credito', descripcion: 'Confirma una nota de crédito preparada. Lo llama el orquestador tras el toque de la persona.', esquema: confirmarEsquema(), manejar: async (a, c, erp) => ({ ...(await erp.confirmar('nota_credito', a, c)) }) },
 ];
 
 export const toolsMcp = (): ToolMcp[] => TOOLS.map((t) => ({ nombre: t.nombre, descripcion: t.descripcion, esquema: t.esquema }));

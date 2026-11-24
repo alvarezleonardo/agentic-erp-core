@@ -33,7 +33,7 @@ import {
   type StepUp,
   type ValorMetrica,
 } from '@agentic-erp/mcp-contract';
-import { ANOMALIA_CAJA, HOY, INICIO_DATOS, MONEDA, generarDatos, type Articulo, type DatosErp, type MovimientoCaja, type OrdenCompra } from './datos.js';
+import { ANOMALIA_CAJA, HOY, INICIO_DATOS, MONEDA, estadoDeFactura, generarDatos, saldoDeFactura, type Articulo, type Cliente, type DatosErp, type Factura, type MovimientoCaja, type NotaCredito, type OrdenCompra } from './datos.js';
 import { diaDeSemana, diasEntre, esFecha, rango, sumarDias } from './fechas.js';
 import { ROLES_AUTORIZADORES, ROLES_POR_ESCRITURA } from './permisos.js';
 
@@ -59,12 +59,15 @@ export interface OpcionesErp {
   idempotencia?: RegistroIdempotencia;
   /** Umbrales de caja en centavos. Por defecto 500.00 (egreso con supervisor) y 2000.00 (supervisor y motivo). */
   umbralesCaja?: { supervisor?: number; supervisorYMotivo?: number };
+  /** Importe de nota de crédito, en centavos, desde el cual se pide la confirmación de un supervisor. Por defecto 1000.00. */
+  umbralNotaCredito?: number;
 }
 
 type Efecto =
   | { tipo: 'ajuste_stock'; articulo_id: string; existencia_nueva: number }
   | { tipo: 'orden_compra'; proveedor_id: string; lineas: { articulo_id: string; cantidad: number; costo_unitario: number }[] }
-  | { tipo: 'movimiento_caja'; mov: Omit<MovimientoCaja, 'id' | 'fecha'> };
+  | { tipo: 'movimiento_caja'; mov: Omit<MovimientoCaja, 'id' | 'fecha'> }
+  | { tipo: 'nota_credito'; factura_id: string; importe: number; motivo: string };
 
 interface PropuestaGuardada {
   id: string;
@@ -100,6 +103,7 @@ const UMBRAL_STEP_UP_CAJA = 50_000; // 500.00: egresos desde acá piden un super
 const UMBRAL_MOTIVO_CAJA = 200_000; // 2000.00: egresos desde acá piden supervisor y motivo; ingresos desde 500.00 piden motivo
 const UMBRAL_STEP_UP_COMPRA = 500_000; // 5000.00
 const UMBRAL_DIFERENCIA_CAJA = 1_000; // 10.00
+const UMBRAL_STEP_UP_NOTA_CREDITO = 100_000; // 1000.00: notas de crédito desde acá piden un supervisor
 
 export const METRICAS: DefMetrica[] = [
   { id: 'ventas_total', etiqueta: 'Ventas', descripcion: 'Ingresos por ventas en el período, todos los canales.', tipo: 'moneda', dimensiones: ['dia', 'articulo', 'categoria', 'canal'], sentido_favorable: 'mayor_es_mejor' },
@@ -159,6 +163,7 @@ export class ErpSintetico {
   private readonly idempotencia: RegistroIdempotencia;
   private readonly umbralSupervisorCaja: number;
   private readonly umbralMotivoCaja: number;
+  private readonly umbralNotaCredito: number;
 
   constructor(o: OpcionesErp = {}) {
     this.datos = o.datos ?? generarDatos();
@@ -168,6 +173,7 @@ export class ErpSintetico {
     this.idempotencia = o.idempotencia ?? new RegistroIdempotenciaMemoria();
     this.umbralSupervisorCaja = o.umbralesCaja?.supervisor ?? UMBRAL_STEP_UP_CAJA;
     this.umbralMotivoCaja = o.umbralesCaja?.supervisorYMotivo ?? UMBRAL_MOTIVO_CAJA;
+    this.umbralNotaCredito = o.umbralNotaCredito ?? UMBRAL_STEP_UP_NOTA_CREDITO;
     this.cierres = this.calcularCierres();
     this.sembrarEventos();
   }
@@ -629,6 +635,218 @@ export class ErpSintetico {
     };
   }
 
+  // ------------------------------------------------------------------ facturación
+
+  private cliente(id: unknown): Cliente {
+    const c = this.datos.clientes.find((x) => x.id === id);
+    if (!c) throw new ErrorErp('NO_ENCONTRADO', `No existe el cliente ${String(id)}.`, 'Buscá el cliente por nombre y probá de nuevo.');
+    return c;
+  }
+
+  private nombreCliente(id: string): string {
+    return this.datos.clientes.find((c) => c.id === id)?.nombre ?? id;
+  }
+
+  private etiquetaFactura(f: Factura): string {
+    return `${f.tipo} ${f.numero}`;
+  }
+
+  private saldoCliente(clienteId: string): number {
+    return sumarCentavos(this.datos.facturas.filter((f) => f.cliente_id === clienteId).map((f) => saldoDeFactura(f)));
+  }
+
+  private estadoCliente(c: Cliente): 'contado' | 'ok' | 'limite_excedido' {
+    if (c.condicion_pago === 'contado') return 'contado';
+    return this.saldoCliente(c.id) > c.limite_credito ? 'limite_excedido' : 'ok';
+  }
+
+  private vencida(f: Factura): boolean {
+    return f.vencimiento < HOY && saldoDeFactura(f) > 0;
+  }
+
+  buscarClientes(texto: unknown): SalidaTabla {
+    const q = normalizar(String(texto ?? '')).split(/\s+/).filter(Boolean);
+    if (q.length === 0) throw new ErrorErp('PARAMETRO_INVALIDO', 'Indicá qué cliente buscar.');
+    const clientes = this.datos.clientes.filter((c) => {
+      const pajar = normalizar(c.nombre);
+      return q.every((p) => pajar.includes(p));
+    });
+    return {
+      titulo: `Clientes que coinciden con «${String(texto)}»`,
+      columnas: [
+        { id: 'cliente_id', etiqueta: 'Código', tipo: 'texto' },
+        { id: 'nombre', etiqueta: 'Cliente', tipo: 'texto' },
+        { id: 'condicion_pago', etiqueta: 'Condición de pago', tipo: 'texto' },
+        { id: 'limite_credito', etiqueta: 'Límite de crédito', tipo: 'dinero' },
+        { id: 'saldo_pendiente', etiqueta: 'Saldo pendiente', tipo: 'dinero' },
+        { id: 'estado', etiqueta: 'Estado', tipo: 'estado' },
+      ],
+      filas: clientes.map((c) => ({
+        cliente_id: c.id,
+        nombre: c.nombre,
+        condicion_pago: c.condicion_pago === 'contado' ? 'Contado' : 'Cuenta corriente',
+        limite_credito: dinero(c.limite_credito),
+        saldo_pendiente: dinero(this.saldoCliente(c.id)),
+        estado: this.estadoCliente(c),
+      })),
+      total_filas: clientes.length,
+    };
+  }
+
+  private filaFactura(f: Factura): Obj {
+    return {
+      factura_id: f.id,
+      numero: this.etiquetaFactura(f),
+      fecha: f.fecha,
+      vencimiento: f.vencimiento,
+      cliente: this.nombreCliente(f.cliente_id),
+      cliente_id: f.cliente_id,
+      importe: dinero(f.importe),
+      saldo: dinero(saldoDeFactura(f)),
+      estado: f.estado,
+      vencida: this.vencida(f),
+    };
+  }
+
+  listarFacturas(a: Obj): SalidaTabla {
+    const cliente = a['cliente_id'] === undefined ? undefined : this.cliente(a['cliente_id']);
+    const desde = a['desde'] === undefined ? undefined : fechaValida(a['desde'], 'desde');
+    const hasta = a['hasta'] === undefined ? undefined : fechaValida(a['hasta'], 'hasta');
+    if (desde && hasta && desde > hasta) throw new ErrorErp('PARAMETRO_INVALIDO', 'desde no puede ser posterior a hasta.');
+    const estado = a['estado'];
+    if (estado !== undefined && !['emitida', 'anulada', 'parcialmente_cobrada', 'cobrada'].includes(String(estado))) throw new ErrorErp('PARAMETRO_INVALIDO', 'estado debe ser emitida, anulada, parcialmente_cobrada o cobrada.');
+    const facturas = this.datos.facturas
+      .filter((f) => (!cliente || f.cliente_id === cliente.id) && (!desde || f.fecha >= desde) && (!hasta || f.fecha <= hasta) && (estado === undefined || f.estado === estado) && (a['solo_con_saldo'] !== true || saldoDeFactura(f) > 0))
+      .sort((x, y) => y.fecha.localeCompare(x.fecha) || y.numero.localeCompare(x.numero));
+    const saldo = sumarCentavos(facturas.map((f) => saldoDeFactura(f)));
+    return {
+      titulo: `Facturas${cliente ? ` de ${cliente.nombre}` : ''}${desde || hasta ? `, ${desde ?? 'inicio'} a ${hasta ?? HOY}` : ''}: ${facturas.length}, saldo ${fmt(saldo)}`,
+      columnas: [
+        { id: 'numero', etiqueta: 'Comprobante', tipo: 'texto' },
+        { id: 'fecha', etiqueta: 'Fecha', tipo: 'fecha' },
+        { id: 'vencimiento', etiqueta: 'Vence', tipo: 'fecha' },
+        { id: 'cliente', etiqueta: 'Cliente', tipo: 'texto' },
+        { id: 'importe', etiqueta: 'Importe', tipo: 'dinero' },
+        { id: 'saldo', etiqueta: 'Saldo', tipo: 'dinero' },
+        { id: 'estado', etiqueta: 'Estado', tipo: 'estado' },
+      ],
+      filas: facturas.map((f) => this.filaFactura(f)),
+      total_filas: facturas.length,
+    };
+  }
+
+  private facturaPor(a: Obj): Factura {
+    const numero = typeof a['numero'] === 'string' ? a['numero'].trim().replace(/^[AB]\s+/i, '') : undefined;
+    if (a['factura_id'] === undefined && numero === undefined) throw new ErrorErp('PARAMETRO_INVALIDO', 'Indicá factura_id o numero.');
+    const f = a['factura_id'] !== undefined ? this.datos.facturas.find((x) => x.id === a['factura_id']) : this.datos.facturas.find((x) => x.numero === numero);
+    if (!f) throw new ErrorErp('NO_ENCONTRADO', `No existe la factura ${String(a['factura_id'] ?? a['numero'])}.`, 'Buscá la factura por cliente o por número y probá de nuevo.');
+    return f;
+  }
+
+  obtenerFactura(a: Obj): SalidaDetalle & { factura_id: string } {
+    const f = this.facturaPor(a);
+    const etiquetaEstado: Record<Factura['estado'], string> = { emitida: 'Emitida', anulada: 'Anulada', parcialmente_cobrada: 'Parcialmente cobrada', cobrada: 'Cobrada' };
+    return {
+      factura_id: f.id,
+      titulo: `Factura ${this.etiquetaFactura(f)}`,
+      campos: [
+        { etiqueta: 'Id', valor: f.id },
+        { etiqueta: 'Cliente', valor: this.nombreCliente(f.cliente_id) },
+        { etiqueta: 'Fecha', valor: f.fecha },
+        { etiqueta: 'Vencimiento', valor: this.vencida(f) ? `${f.vencimiento} (vencida)` : f.vencimiento },
+        { etiqueta: 'Importe', valor: fmt(f.importe) },
+        { etiqueta: 'Cobrado', valor: fmt(f.cobrado) },
+        { etiqueta: 'Notas de crédito', valor: fmt(f.acreditado) },
+        { etiqueta: 'Saldo pendiente', valor: fmt(saldoDeFactura(f)) },
+        { etiqueta: 'Estado', valor: etiquetaEstado[f.estado] },
+      ],
+    };
+  }
+
+  /** Facturado = facturas del período que no están anuladas. Una factura anulada no cuenta, ni ella ni su nota de crédito. */
+  private facturasVigentes(desde: string, hasta: string): Factura[] {
+    return this.datos.facturas.filter((f) => f.fecha >= desde && f.fecha <= hasta && f.estado !== 'anulada');
+  }
+
+  private notasDelPeriodo(desde: string, hasta: string): NotaCredito[] {
+    const vigentes = new Set(this.datos.facturas.filter((f) => f.estado !== 'anulada').map((f) => f.id));
+    return this.datos.notasCredito.filter((n) => n.fecha >= desde && n.fecha <= hasta && vigentes.has(n.factura_id));
+  }
+
+  private cifrasFacturacion(desde: string, hasta: string): { facturado: number; notas: number; comprobantes: number; saldo: number } {
+    const facturas = this.facturasVigentes(desde, hasta);
+    return {
+      facturado: sumarCentavos(facturas.map((f) => f.importe)),
+      notas: sumarCentavos(this.notasDelPeriodo(desde, hasta).map((n) => n.importe)),
+      comprobantes: facturas.length,
+      saldo: sumarCentavos(facturas.map((f) => saldoDeFactura(f))),
+    };
+  }
+
+  /**
+   * Sin `agrupar_por` devuelve indicadores (KpiTiles) con la comparación contra el período anterior de igual duración.
+   * Con `agrupar_por` (mes, cliente o tipo de comprobante) devuelve una tabla.
+   */
+  resumenFacturacion(desdeIn: unknown, hastaIn: unknown, agruparPor: unknown): SalidaMetricas | SalidaTabla {
+    const desde = fechaValida(desdeIn, 'desde');
+    const hasta = fechaValida(hastaIn, 'hasta');
+    if (desde > hasta) throw new ErrorErp('PARAMETRO_INVALIDO', 'desde no puede ser posterior a hasta.');
+    if (agruparPor === undefined) {
+      const n = diasEntre(desde, hasta);
+      const antDesde = sumarDias(desde, -n);
+      const antHasta = sumarDias(desde, -1);
+      const actual = this.cifrasFacturacion(desde, hasta);
+      const previo = antDesde >= INICIO_DATOS ? this.cifrasFacturacion(antDesde, antHasta) : undefined;
+      const kpi = (id: string, etiqueta: string, tipo: 'moneda' | 'cantidad', valor: number, anterior: number | undefined, sentido: KpiMetrica['sentido_favorable']): KpiMetrica => {
+        const v = (x: number): ValorMetrica => (tipo === 'moneda' ? { tipo: 'moneda', valor: dinero(x).monto, moneda: MONEDA } : { tipo: 'cantidad', valor: String(x) });
+        const k: KpiMetrica = { id, etiqueta, valor: v(valor), sentido_favorable: sentido };
+        if (anterior !== undefined && anterior !== 0) {
+          const pct = ((valor - anterior) / Math.abs(anterior)) * 100;
+          k.comparacion = { variacion_pct: pct.toFixed(1), periodo_anterior: `${antDesde} a ${antHasta}`, valor_anterior: v(anterior) };
+          k.tendencia = pct > 2 ? 'sube' : pct < -2 ? 'baja' : 'estable';
+        }
+        return k;
+      };
+      return {
+        periodo: { desde, hasta, etiqueta: `${desde} a ${hasta}` },
+        kpis: [
+          kpi('facturado_total', 'Facturado', 'moneda', actual.facturado, previo?.facturado, 'mayor_es_mejor'),
+          kpi('notas_credito_total', 'Notas de crédito', 'moneda', actual.notas, previo?.notas, 'menor_es_mejor'),
+          kpi('facturado_neto', 'Facturado neto', 'moneda', actual.facturado - actual.notas, previo ? previo.facturado - previo.notas : undefined, 'mayor_es_mejor'),
+          kpi('comprobantes', 'Comprobantes', 'cantidad', actual.comprobantes, previo?.comprobantes, 'mayor_es_mejor'),
+          kpi('saldo_pendiente', 'Saldo pendiente de cobro', 'moneda', actual.saldo, undefined, 'menor_es_mejor'),
+        ],
+        fuente: { origen: 'ERP sintético (datos de ejemplo)', actualizado_en: `${HOY}T08:00:00.000Z` },
+      };
+    }
+    const grupo = (['mes', 'cliente', 'tipo'] as const).find((g) => g === agruparPor);
+    if (!grupo) throw new ErrorErp('PARAMETRO_INVALIDO', 'agrupar_por debe ser mes, cliente o tipo.');
+    const acc = new Map<string, { comprobantes: number; facturado: number; saldo: number }>();
+    for (const f of this.facturasVigentes(desde, hasta)) {
+      const clave = grupo === 'mes' ? f.fecha.slice(0, 7) : grupo === 'cliente' ? this.nombreCliente(f.cliente_id) : `Tipo ${f.tipo}`;
+      const a = acc.get(clave) ?? { comprobantes: 0, facturado: 0, saldo: 0 };
+      a.comprobantes += 1;
+      a.facturado += f.importe;
+      a.saldo += saldoDeFactura(f);
+      acc.set(clave, a);
+    }
+    const filas = [...acc].map(([clave, a]) => ({ grupo: clave, comprobantes: a.comprobantes, facturado: dinero(a.facturado), saldo: dinero(a.saldo) }));
+    if (grupo === 'mes') filas.sort((x, y) => x.grupo.localeCompare(y.grupo));
+    else filas.sort((x, y) => centavosDeDinero(y.facturado) - centavosDeDinero(x.facturado) || x.grupo.localeCompare(y.grupo));
+    const nombre = grupo === 'mes' ? 'mes' : grupo === 'cliente' ? 'cliente' : 'tipo de comprobante';
+    return {
+      titulo: `Facturado por ${nombre}, ${desde} a ${hasta}`,
+      columnas: [
+        { id: 'grupo', etiqueta: grupo === 'mes' ? 'Mes' : grupo === 'cliente' ? 'Cliente' : 'Tipo', tipo: 'texto' },
+        { id: 'comprobantes', etiqueta: 'Comprobantes', tipo: 'numero' },
+        { id: 'facturado', etiqueta: 'Facturado', tipo: 'dinero' },
+        { id: 'saldo', etiqueta: 'Saldo pendiente', tipo: 'dinero' },
+      ],
+      filas,
+      total_filas: filas.length,
+    };
+  }
+
   // ------------------------------------------------------------------ escrituras: preparar
 
   private exigirRol(tool: string, ctx: ContextoSesion): void {
@@ -734,9 +952,42 @@ export class ErpSintetico {
     });
   }
 
+  prepararNotaCredito(a: Obj, ctx: ContextoSesion): Propuesta {
+    this.exigirRol('preparar_nota_credito', ctx);
+    const f = this.facturaPor({ factura_id: a['factura_id'] });
+    const motivo = typeof a['motivo'] === 'string' ? a['motivo'].trim() : '';
+    if (motivo.length < 3 || motivo.length > 120) throw new ErrorErp('PARAMETRO_INVALIDO', 'El motivo de la nota de crédito es obligatorio (3 a 120 caracteres).', 'Preguntale a la persona el motivo.');
+    const saldo = saldoDeFactura(f);
+    this.exigirAcreditable(f);
+    const importe = a['importe'] === undefined ? saldo : parsearImporte(a['importe']);
+    if (importe > saldo) throw new ErrorErp('IMPORTE_EXCEDE_SALDO', `El importe de la nota de crédito no puede superar el saldo de la factura (${fmt(saldo)}).`, 'Pedí un importe menor o acreditá el saldo completo.');
+    const total = importe === saldo;
+    const stepUp: StepUp = importe >= this.umbralNotaCredito ? 'supervisor' : 'none';
+    const p = this.guardar({ tipo: 'nota_credito', factura_id: f.id, importe, motivo }, dinero(importe), stepUp, ctx);
+    this.aud(ctx, 'preparar_nota_credito');
+    return this.propuesta(p, {
+      titulo: `Nota de crédito ${total ? 'total' : 'parcial'} sobre la factura ${this.etiquetaFactura(f)}`,
+      resumen: [
+        { etiqueta: 'Cliente', valor: this.nombreCliente(f.cliente_id) },
+        { etiqueta: 'Factura', valor: this.etiquetaFactura(f) },
+        { etiqueta: 'Saldo de la factura', valor: fmt(saldo) },
+        { etiqueta: 'Saldo después de la nota', valor: fmt(saldo - importe) },
+        { etiqueta: 'Motivo', valor: motivo },
+      ],
+      lineas: [{ descripcion: `Nota de crédito ${total ? 'total' : 'parcial'} sobre ${this.etiquetaFactura(f)}`, importe: dinero(importe) }],
+      ...(stepUp !== 'none' ? { advertencias: [`Las notas de crédito de ${montoUmbral(this.umbralNotaCredito)} o más necesitan la confirmación de un supervisor.`] } : {}),
+    });
+  }
+
+  /** Una factura anulada o cobrada por completo no se puede acreditar. */
+  private exigirAcreditable(f: Factura): void {
+    if (f.estado === 'anulada') throw new ErrorErp('FACTURA_NO_ACREDITABLE', `La factura ${this.etiquetaFactura(f)} está anulada.`, 'No hace falta otra nota de crédito sobre una factura anulada.');
+    if (saldoDeFactura(f) <= 0) throw new ErrorErp('FACTURA_NO_ACREDITABLE', `La factura ${this.etiquetaFactura(f)} ya está cobrada en su totalidad.`, 'Una nota de crédito sobre una factura cobrada se resuelve con una devolución, que este agente no hace.');
+  }
+
   // ------------------------------------------------------------------ escrituras: confirmar
 
-  async confirmar(tool: 'ajuste_stock' | 'orden_compra' | 'movimiento_caja', a: Obj, ctx: ContextoSesion): Promise<ConfirmarSalida> {
+  async confirmar(tool: 'ajuste_stock' | 'orden_compra' | 'movimiento_caja' | 'nota_credito', a: Obj, ctx: ContextoSesion): Promise<ConfirmarSalida> {
     this.exigirRol(`preparar_${tool}`, ctx);
     const p = typeof a['proposal_id'] === 'string' ? this.propuestas.get(a['proposal_id']) : undefined;
     if (!p || p.efecto.tipo !== tool) throw new ErrorErp('PROPUESTA_NO_ENCONTRADA', 'No existe esa propuesta.');
@@ -788,6 +1039,26 @@ export class ErpSintetico {
       this.emitir('orden_compra_creada', { orden_id: orden.id, proveedor_id: orden.proveedor_id, lineas: orden.lineas.length });
       resultado = { orden_id: orden.id, ...(p.total ? { total: p.total } : {}) };
       mensaje = `Orden de compra ${orden.id} creada.`;
+    } else if (e.tipo === 'nota_credito') {
+      const f = this.facturaPor({ factura_id: e.factura_id });
+      // Entre preparar y confirmar el saldo pudo cambiar (un cobro, otra nota): se vuelve a verificar contra el estado real.
+      this.exigirAcreditable(f);
+      if (e.importe > saldoDeFactura(f)) throw new ErrorErp('IMPORTE_EXCEDE_SALDO', `El saldo de la factura cambió y ya no alcanza para esta nota de crédito (${fmt(saldoDeFactura(f))}).`, 'Pedí la operación de nuevo.');
+      const nota: NotaCredito = {
+        id: `nc_${String(this.datos.notasCredito.length + 1).padStart(4, '0')}`,
+        numero: `0001-${String(1 + Math.max(0, ...this.datos.notasCredito.filter((n) => n.tipo === f.tipo).map((n) => Number(n.numero.slice(5))))).padStart(8, '0')}`,
+        tipo: f.tipo,
+        factura_id: f.id,
+        fecha: HOY,
+        importe: e.importe,
+        motivo: e.motivo,
+      };
+      this.datos.notasCredito.push(nota);
+      f.acreditado += e.importe;
+      f.estado = estadoDeFactura(f);
+      this.emitir('nota_credito_emitida', { nota_id: nota.id, factura_id: f.id });
+      resultado = { nota_credito_id: nota.id, numero: `${nota.tipo} ${nota.numero}`, factura_id: f.id, estado_factura: f.estado, ...(p.total ? { total: p.total } : {}) };
+      mensaje = `Nota de crédito ${nota.tipo} ${nota.numero} emitida sobre la factura ${this.etiquetaFactura(f)}.`;
     } else {
       const mov: MovimientoCaja = { id: `mov_${String(this.datos.movimientos.length + 1).padStart(4, '0')}`, fecha: HOY, ...e.mov };
       this.datos.movimientos.push(mov);
