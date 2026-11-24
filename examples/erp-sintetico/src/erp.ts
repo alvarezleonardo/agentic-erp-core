@@ -33,7 +33,7 @@ import {
   type StepUp,
   type ValorMetrica,
 } from '@agentic-erp/mcp-contract';
-import { ANOMALIA_CAJA, HOY, INICIO_DATOS, MONEDA, estadoDeFactura, generarDatos, saldoDeFactura, type Articulo, type Cliente, type DatosErp, type Factura, type MovimientoCaja, type NotaCredito, type OrdenCompra } from './datos.js';
+import { ANOMALIA_CAJA, HOY, INICIO_DATOS, MONEDA, estadoDeFactura, generarDatos, saldoDeFactura, type Articulo, type Cliente, type Cobranza, type DatosErp, type Factura, type MedioCobro, type MovimientoCaja, type NotaCredito, type OrdenCompra } from './datos.js';
 import { diaDeSemana, diasEntre, esFecha, rango, sumarDias } from './fechas.js';
 import { ROLES_AUTORIZADORES, ROLES_POR_ESCRITURA } from './permisos.js';
 
@@ -61,13 +61,16 @@ export interface OpcionesErp {
   umbralesCaja?: { supervisor?: number; supervisorYMotivo?: number };
   /** Importe de nota de crédito, en centavos, desde el cual se pide la confirmación de un supervisor. Por defecto 1000.00. */
   umbralNotaCredito?: number;
+  /** Importe de cobranza, en centavos, desde el cual se pide la confirmación de un supervisor. Por defecto 5000.00. */
+  umbralCobranza?: number;
 }
 
 type Efecto =
   | { tipo: 'ajuste_stock'; articulo_id: string; existencia_nueva: number }
   | { tipo: 'orden_compra'; proveedor_id: string; lineas: { articulo_id: string; cantidad: number; costo_unitario: number }[] }
   | { tipo: 'movimiento_caja'; mov: Omit<MovimientoCaja, 'id' | 'fecha'> }
-  | { tipo: 'nota_credito'; factura_id: string; importe: number; motivo: string };
+  | { tipo: 'nota_credito'; factura_id: string; importe: number; motivo: string }
+  | { tipo: 'cobranza'; cliente_id: string; medio: MedioCobro; importe: number };
 
 interface PropuestaGuardada {
   id: string;
@@ -104,6 +107,9 @@ const UMBRAL_MOTIVO_CAJA = 200_000; // 2000.00: egresos desde acá piden supervi
 const UMBRAL_STEP_UP_COMPRA = 500_000; // 5000.00
 const UMBRAL_DIFERENCIA_CAJA = 1_000; // 10.00
 const UMBRAL_STEP_UP_NOTA_CREDITO = 100_000; // 1000.00: notas de crédito desde acá piden un supervisor
+const UMBRAL_STEP_UP_COBRANZA = 500_000; // 5000.00: cobranzas desde acá piden un supervisor
+const MEDIOS_COBRO: readonly MedioCobro[] = ['efectivo', 'transferencia', 'cheque'];
+const ETIQUETA_MEDIO: Record<MedioCobro, string> = { efectivo: 'Efectivo', transferencia: 'Transferencia', cheque: 'Cheque' };
 
 export const METRICAS: DefMetrica[] = [
   { id: 'ventas_total', etiqueta: 'Ventas', descripcion: 'Ingresos por ventas en el período, todos los canales.', tipo: 'moneda', dimensiones: ['dia', 'articulo', 'categoria', 'canal'], sentido_favorable: 'mayor_es_mejor' },
@@ -164,6 +170,7 @@ export class ErpSintetico {
   private readonly umbralSupervisorCaja: number;
   private readonly umbralMotivoCaja: number;
   private readonly umbralNotaCredito: number;
+  private readonly umbralCobranza: number;
 
   constructor(o: OpcionesErp = {}) {
     this.datos = o.datos ?? generarDatos();
@@ -174,6 +181,7 @@ export class ErpSintetico {
     this.umbralSupervisorCaja = o.umbralesCaja?.supervisor ?? UMBRAL_STEP_UP_CAJA;
     this.umbralMotivoCaja = o.umbralesCaja?.supervisorYMotivo ?? UMBRAL_MOTIVO_CAJA;
     this.umbralNotaCredito = o.umbralNotaCredito ?? UMBRAL_STEP_UP_NOTA_CREDITO;
+    this.umbralCobranza = o.umbralCobranza ?? UMBRAL_STEP_UP_COBRANZA;
     this.cierres = this.calcularCierres();
     this.sembrarEventos();
   }
@@ -847,6 +855,125 @@ export class ErpSintetico {
     };
   }
 
+  // ------------------------------------------------------------------ clientes y cobranzas
+
+  /** Días desde la emisión. La antigüedad de la deuda se cuenta desde la emisión, no desde el vencimiento. */
+  private antiguedad(f: Factura): number {
+    return diasEntre(f.fecha, HOY) - 1;
+  }
+
+  /** Facturas con saldo de un cliente, de la más vieja a la más nueva: es el orden en que se imputa un cobro. */
+  private facturasConSaldo(clienteId: string): Factura[] {
+    return this.datos.facturas.filter((f) => f.cliente_id === clienteId && saldoDeFactura(f) > 0).sort((x, y) => x.fecha.localeCompare(y.fecha) || x.numero.localeCompare(y.numero));
+  }
+
+  /** Reparte un cobro entre las facturas con saldo, empezando por la más vieja. No cambia nada. */
+  private imputar(clienteId: string, importe: number): { factura: Factura; importe: number; saldoDespues: number }[] {
+    let resto = importe;
+    const out: { factura: Factura; importe: number; saldoDespues: number }[] = [];
+    for (const f of this.facturasConSaldo(clienteId)) {
+      if (resto <= 0) break;
+      const saldo = saldoDeFactura(f);
+      const parte = Math.min(saldo, resto);
+      out.push({ factura: f, importe: parte, saldoDespues: saldo - parte });
+      resto -= parte;
+    }
+    return out;
+  }
+
+  estadoCuentaCliente(a: Obj): SalidaDetalle & { cliente_id: string } {
+    const c = this.cliente(a['cliente_id']);
+    const abiertas = this.facturasConSaldo(c.id);
+    const saldo = sumarCentavos(abiertas.map((f) => saldoDeFactura(f)));
+    const vencido = sumarCentavos(abiertas.filter((f) => this.vencida(f)).map((f) => saldoDeFactura(f)));
+    const cc = c.condicion_pago === 'cuenta_corriente';
+    const campos = [
+      { etiqueta: 'Cliente', valor: c.nombre },
+      { etiqueta: 'Condición de pago', valor: cc ? `Cuenta corriente, ${c.plazo_dias} días` : 'Contado' },
+      { etiqueta: 'Saldo pendiente', valor: fmt(saldo) },
+      { etiqueta: 'Vencido', valor: fmt(vencido) },
+      { etiqueta: 'A vencer', valor: fmt(saldo - vencido) },
+    ];
+    if (cc) {
+      campos.push({ etiqueta: 'Límite de crédito', valor: fmt(c.limite_credito) });
+      campos.push(saldo > c.limite_credito ? { etiqueta: 'Crédito disponible', valor: `Ninguno: excede el límite en ${fmt(saldo - c.limite_credito)}` } : { etiqueta: 'Crédito disponible', valor: fmt(c.limite_credito - saldo) });
+    } else campos.push({ etiqueta: 'Límite de crédito', valor: 'No tiene (cliente de contado)' });
+    campos.push({ etiqueta: 'Facturas con saldo', valor: String(abiertas.length) });
+    for (const f of abiertas) campos.push({ etiqueta: `Factura ${this.etiquetaFactura(f)} (${f.fecha})`, valor: `${fmt(saldoDeFactura(f))}, ${this.vencida(f) ? `vencida el ${f.vencimiento}` : `vence el ${f.vencimiento}`}` });
+    return { cliente_id: c.id, titulo: `Estado de cuenta de ${c.nombre}`, campos };
+  }
+
+  listarDeudores(a: Obj): SalidaTabla {
+    const minimo = a['antiguedad_minima'] === undefined ? 0 : entero(a['antiguedad_minima'], 'antiguedad_minima', 0, 3_650);
+    const orden = a['orden'] ?? 'saldo_vencido';
+    if (!['saldo_vencido', 'antiguedad', 'nombre'].includes(String(orden))) throw new ErrorErp('PARAMETRO_INVALIDO', 'orden debe ser saldo_vencido, antiguedad o nombre.');
+    const limite = a['limite'] === undefined ? 50 : entero(a['limite'], 'limite', 1, 50);
+    const filas = this.datos.clientes
+      .map((c) => {
+        // Solo cuenta lo vencido y de más de `minimo` días desde la emisión.
+        const vencidas = this.facturasConSaldo(c.id).filter((f) => this.vencida(f) && this.antiguedad(f) > minimo);
+        const tramo = (desde: number, hasta: number): number => sumarCentavos(vencidas.filter((f) => this.antiguedad(f) >= desde && this.antiguedad(f) <= hasta).map((f) => saldoDeFactura(f)));
+        return {
+          c,
+          vencidas,
+          vencido: sumarCentavos(vencidas.map((f) => saldoDeFactura(f))),
+          t030: tramo(0, 30),
+          t3160: tramo(31, 60),
+          t6190: tramo(61, 90),
+          t90: tramo(91, Number.MAX_SAFE_INTEGER),
+          maxima: Math.max(0, ...vencidas.map((f) => this.antiguedad(f))),
+        };
+      })
+      .filter((x) => x.vencidas.length > 0)
+      .sort((x, y) => (orden === 'nombre' ? x.c.nombre.localeCompare(y.c.nombre, 'es') : orden === 'antiguedad' ? y.maxima - x.maxima || y.vencido - x.vencido : y.vencido - x.vencido || x.c.nombre.localeCompare(y.c.nombre, 'es')));
+    const visibles = filas.slice(0, limite);
+    return {
+      titulo: `Clientes con saldo vencido${minimo > 0 ? ` de más de ${minimo} días` : ''}: ${filas.length}, total vencido ${fmt(sumarCentavos(filas.map((x) => x.vencido)))}`,
+      columnas: [
+        { id: 'cliente_id', etiqueta: 'Código', tipo: 'texto' },
+        { id: 'cliente', etiqueta: 'Cliente', tipo: 'texto' },
+        { id: 'saldo_vencido', etiqueta: 'Saldo vencido', tipo: 'dinero' },
+        { id: 'tramo_0_30', etiqueta: '0-30 días', tipo: 'dinero' },
+        { id: 'tramo_31_60', etiqueta: '31-60 días', tipo: 'dinero' },
+        { id: 'tramo_61_90', etiqueta: '61-90 días', tipo: 'dinero' },
+        { id: 'tramo_mas_90', etiqueta: 'Más de 90 días', tipo: 'dinero' },
+        { id: 'antiguedad_maxima', etiqueta: 'Factura más vieja (días)', tipo: 'numero' },
+      ],
+      filas: visibles.map((x) => ({
+        cliente_id: x.c.id,
+        cliente: x.c.nombre,
+        saldo_vencido: dinero(x.vencido),
+        tramo_0_30: dinero(x.t030),
+        tramo_31_60: dinero(x.t3160),
+        tramo_61_90: dinero(x.t6190),
+        tramo_mas_90: dinero(x.t90),
+        antiguedad_maxima: x.maxima,
+      })),
+      total_filas: filas.length,
+    };
+  }
+
+  listarCobranzas(a: Obj): SalidaTabla {
+    const cliente = a['cliente_id'] === undefined ? undefined : this.cliente(a['cliente_id']);
+    const desde = a['desde'] === undefined ? undefined : fechaValida(a['desde'], 'desde');
+    const hasta = a['hasta'] === undefined ? undefined : fechaValida(a['hasta'], 'hasta');
+    if (desde && hasta && desde > hasta) throw new ErrorErp('PARAMETRO_INVALIDO', 'desde no puede ser posterior a hasta.');
+    const cobros = this.datos.cobranzas.filter((c) => (!cliente || c.cliente_id === cliente.id) && (!desde || c.fecha >= desde) && (!hasta || c.fecha <= hasta)).sort((x, y) => y.fecha.localeCompare(x.fecha) || y.numero.localeCompare(x.numero));
+    return {
+      titulo: `Cobranzas${cliente ? ` de ${cliente.nombre}` : ''}: ${cobros.length}, total ${fmt(sumarCentavos(cobros.map((c) => c.importe)))}`,
+      columnas: [
+        { id: 'numero', etiqueta: 'Recibo', tipo: 'texto' },
+        { id: 'fecha', etiqueta: 'Fecha', tipo: 'fecha' },
+        { id: 'cliente', etiqueta: 'Cliente', tipo: 'texto' },
+        { id: 'medio', etiqueta: 'Medio', tipo: 'texto' },
+        { id: 'importe', etiqueta: 'Importe', tipo: 'dinero' },
+        { id: 'facturas', etiqueta: 'Facturas', tipo: 'numero' },
+      ],
+      filas: cobros.map((c) => ({ cobranza_id: c.id, numero: c.numero, fecha: c.fecha, cliente: this.nombreCliente(c.cliente_id), medio: ETIQUETA_MEDIO[c.medio], importe: dinero(c.importe), facturas: c.imputaciones.length })),
+      total_filas: cobros.length,
+    };
+  }
+
   // ------------------------------------------------------------------ escrituras: preparar
 
   private exigirRol(tool: string, ctx: ContextoSesion): void {
@@ -979,6 +1106,38 @@ export class ErpSintetico {
     });
   }
 
+  prepararCobranza(a: Obj, ctx: ContextoSesion): Propuesta {
+    this.exigirRol('preparar_cobranza', ctx);
+    const c = this.cliente(a['cliente_id']);
+    const medio = a['medio'];
+    if (typeof medio !== 'string' || !(MEDIOS_COBRO as readonly string[]).includes(medio)) throw new ErrorErp('PARAMETRO_INVALIDO', 'medio debe ser efectivo, transferencia o cheque.', 'Preguntale a la persona el medio de cobro.');
+    const importe = parsearImporte(a['importe']);
+    const deuda = this.saldoCliente(c.id);
+    if (deuda <= 0) throw new ErrorErp('SIN_DEUDA', `${c.nombre} no tiene facturas con saldo.`, 'No hay nada que imputar: un cobro sin deuda no se registra como anticipo.');
+    // Un cobro mayor a la deuda se rechaza: este ejemplo no lleva saldo a favor ni anticipos.
+    if (importe > deuda) throw new ErrorErp('IMPORTE_EXCEDE_DEUDA', `El cobro no puede superar lo que ${c.nombre} debe (${fmt(deuda)}).`, 'Pedí un importe menor o igual a la deuda.');
+    const plan = this.imputar(c.id, importe);
+    const stepUp: StepUp = importe >= this.umbralCobranza ? 'supervisor' : 'none';
+    const p = this.guardar({ tipo: 'cobranza', cliente_id: c.id, medio: medio as MedioCobro, importe }, dinero(importe), stepUp, ctx);
+    this.aud(ctx, 'preparar_cobranza');
+    const saldadas = plan.filter((x) => x.saldoDespues === 0).length;
+    const advertencias: string[] = [];
+    if (medio === 'efectivo') advertencias.push('Al confirmar se registra también el ingreso en la caja de hoy.');
+    if (stepUp !== 'none') advertencias.push(`Las cobranzas de ${montoUmbral(this.umbralCobranza)} o más necesitan la confirmación de un supervisor.`);
+    return this.propuesta(p, {
+      titulo: `Cobranza a ${c.nombre}`,
+      resumen: [
+        { etiqueta: 'Cliente', valor: c.nombre },
+        { etiqueta: 'Medio', valor: ETIQUETA_MEDIO[medio as MedioCobro] },
+        { etiqueta: 'Deuda antes del cobro', valor: fmt(deuda) },
+        { etiqueta: 'Deuda después del cobro', valor: fmt(deuda - importe) },
+        { etiqueta: 'Facturas que quedan cobradas', valor: `${saldadas} de ${plan.length}` },
+      ],
+      lineas: plan.map((x) => ({ descripcion: `Factura ${this.etiquetaFactura(x.factura)} (${x.factura.fecha}), queda ${x.saldoDespues === 0 ? 'cobrada' : `con saldo ${fmt(x.saldoDespues)}`}`, importe: dinero(x.importe) })),
+      ...(advertencias.length ? { advertencias } : {}),
+    });
+  }
+
   /** Una factura anulada o cobrada por completo no se puede acreditar. */
   private exigirAcreditable(f: Factura): void {
     if (f.estado === 'anulada') throw new ErrorErp('FACTURA_NO_ACREDITABLE', `La factura ${this.etiquetaFactura(f)} está anulada.`, 'No hace falta otra nota de crédito sobre una factura anulada.');
@@ -987,7 +1146,7 @@ export class ErpSintetico {
 
   // ------------------------------------------------------------------ escrituras: confirmar
 
-  async confirmar(tool: 'ajuste_stock' | 'orden_compra' | 'movimiento_caja' | 'nota_credito', a: Obj, ctx: ContextoSesion): Promise<ConfirmarSalida> {
+  async confirmar(tool: 'ajuste_stock' | 'orden_compra' | 'movimiento_caja' | 'nota_credito' | 'cobranza', a: Obj, ctx: ContextoSesion): Promise<ConfirmarSalida> {
     this.exigirRol(`preparar_${tool}`, ctx);
     const p = typeof a['proposal_id'] === 'string' ? this.propuestas.get(a['proposal_id']) : undefined;
     if (!p || p.efecto.tipo !== tool) throw new ErrorErp('PROPUESTA_NO_ENCONTRADA', 'No existe esa propuesta.');
@@ -1059,6 +1218,44 @@ export class ErpSintetico {
       this.emitir('nota_credito_emitida', { nota_id: nota.id, factura_id: f.id });
       resultado = { nota_credito_id: nota.id, numero: `${nota.tipo} ${nota.numero}`, factura_id: f.id, estado_factura: f.estado, ...(p.total ? { total: p.total } : {}) };
       mensaje = `Nota de crédito ${nota.tipo} ${nota.numero} emitida sobre la factura ${this.etiquetaFactura(f)}.`;
+    } else if (e.tipo === 'cobranza') {
+      const cli = this.cliente(e.cliente_id);
+      // Entre preparar y confirmar la deuda pudo cambiar (otro cobro, una nota de crédito): se reparte de nuevo contra el estado real.
+      const deuda = this.saldoCliente(cli.id);
+      if (e.importe > deuda) throw new ErrorErp('IMPORTE_EXCEDE_DEUDA', `La deuda de ${cli.nombre} cambió y ya no alcanza para este cobro (${fmt(deuda)}).`, 'Pedí la operación de nuevo.');
+      const plan = this.imputar(cli.id, e.importe);
+      for (const x of plan) {
+        x.factura.cobrado += x.importe;
+        x.factura.estado = estadoDeFactura(x.factura);
+      }
+      const cobro: Cobranza = {
+        id: `cob_${String(this.datos.cobranzas.length + 1).padStart(4, '0')}`,
+        numero: `0001-${String(this.datos.cobranzas.length + 1).padStart(8, '0')}`,
+        cliente_id: cli.id,
+        fecha: HOY,
+        medio: e.medio,
+        importe: e.importe,
+        imputaciones: plan.map((x) => ({ factura_id: x.factura.id, importe: x.importe })),
+      };
+      this.datos.cobranzas.push(cobro);
+      let movimientoId: string | undefined;
+      if (e.medio === 'efectivo') {
+        const mov: MovimientoCaja = { id: `mov_${String(this.datos.movimientos.length + 1).padStart(4, '0')}`, fecha: HOY, tipo: 'ingreso', concepto: `Cobranza ${cli.nombre}`.slice(0, 80), importe: e.importe };
+        this.datos.movimientos.push(mov);
+        movimientoId = mov.id;
+        this.emitir('movimiento_caja_registrado', { movimiento_id: mov.id, tipo: mov.tipo });
+      }
+      this.emitir('cobranza_registrada', { cobranza_id: cobro.id, cliente_id: cli.id, medio: cobro.medio });
+      resultado = {
+        cobranza_id: cobro.id,
+        numero: cobro.numero,
+        cliente_id: cli.id,
+        saldo_cliente: dinero(deuda - e.importe),
+        facturas: plan.map((x) => ({ factura_id: x.factura.id, estado: x.factura.estado })),
+        ...(movimientoId ? { movimiento_caja_id: movimientoId } : {}),
+        ...(p.total ? { total: p.total } : {}),
+      };
+      mensaje = `Cobranza ${cobro.numero} registrada a ${cli.nombre}.`;
     } else {
       const mov: MovimientoCaja = { id: `mov_${String(this.datos.movimientos.length + 1).padStart(4, '0')}`, fecha: HOY, ...e.mov };
       this.datos.movimientos.push(mov);

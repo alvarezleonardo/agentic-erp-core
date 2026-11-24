@@ -8,6 +8,7 @@ export const DOMINIOS: DominioDef[] = [
   { nombre: 'compras', descripcion: 'Proveedores, órdenes de compra, qué hay que comprar o reponer' },
   { nombre: 'caja', descripcion: 'Estado de la caja, movimientos de caja, arqueos, faltantes y sobrantes' },
   { nombre: 'facturacion', descripcion: 'Clientes, facturas de venta, saldo de cada factura, total facturado y notas de crédito' },
+  { nombre: 'cobranzas', descripcion: 'Cuánto debe cada cliente (estado de cuenta, deudores, antigüedad de la deuda, límite de crédito) y registro de cobros' },
 ];
 
 /**
@@ -23,13 +24,15 @@ export const REGLAS: ReglaRouter[] = [
   { dominio: 'caja', patron: /\bcaja\b|\barqueo\w*|\bfaltante\w*|\bsobrante\w*|\bmovimientos? de caja\b|\bretiro\b|\bgastos? menores?\b/ },
   // «factur\w*» vive acá y no en ventas: facturar es facturación, y así «qué facturamos» no dispara dos agentes.
   { dominio: 'facturacion', patron: /\bfactur\w*|\bnotas? de credito\b|\bcomprobantes?\b/ },
+  // Cobranzas: deuda de clientes y cobros. «cobrada/cobrado» (estado de una factura) queda en facturación; acá van los verbos y «cobro/cobranza».
+  { dominio: 'cobranzas', patron: /\bcobros?\b|\bcobre\b|\bcobramos\b|\bcobranzas?\b|\bdeudor\w*|\bmoros\w*|\bnos deb\w*|\bcuanto deb\w*|\bestado de cuenta\b|\blimite de credito\b/ },
 ];
 
 export function crearRouter(llm?: LlmProvider): Router {
   const opciones: OpcionesRouter = {
     dominios: DOMINIOS,
     reglas: REGLAS,
-    descripcionDelNegocio: 'El negocio vende artículos de oficina y tecnología en tienda y online; el ERP lleva ventas, stock, compras, caja y facturación a clientes.',
+    descripcionDelNegocio: 'El negocio vende artículos de oficina y tecnología en tienda y online; el ERP lleva ventas, stock, compras, caja, facturación a clientes y cobranzas.',
     ...(llm ? { llm } : {}),
   };
   return new Router(opciones);
